@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Crimson Pixels 8-bit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 8 8%27%3E%3Crect width=%278%27 height=%278%27 fill=%27%23d12a2a%27/%3E%3Crect x=%272%27 y=%272%27 width=%274%27 height=%274%27 fill=%27%23ffd84a%27/%3E%3C/svg%3E">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #07070c;
+    --frame-hi: #3a3a4d;
+    --frame-mid: #1b1b26;
+    --frame-lo: #0e0e15;
+    --text: #8c8fa3;
+    --led: #d12a2a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body {
+    font-family: "Courier New", monospace;
+    color: var(--text);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 980px; transform-origin: center center;
+    transform: translate(-50%, -50%);
+  }
+  #tv {
+    width: 940px; margin: 0 auto; padding: 20px 20px 14px;
+    background: linear-gradient(180deg, var(--frame-mid), var(--frame-lo));
+    border-radius: 46px;
+    box-shadow:
+      0 0 0 4px #2b2b3a,
+      0 0 0 6px #0a0a10,
+      0 24px 60px rgba(0,0,0,.9),
+      inset 0 3px 0 var(--frame-hi),
+      inset 0 -6px 14px rgba(0,0,0,.8);
+  }
+  #screenwrap {
+    position: relative; width: 900px; height: 600px;
+    border-radius: 28px; overflow: hidden; background: #000;
+    box-shadow: 0 0 0 3px #000, 0 0 24px rgba(120,160,255,.12);
+  }
+  canvas#screen {
+    display: block; width: 900px; height: 600px;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    outline: none;
+  }
+  .scan, .glass { position: absolute; inset: 0; pointer-events: none; }
+  .scan {
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.2) 2px, rgba(0,0,0,.2) 4px);
+  }
+  .glass {
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.07), rgba(255,255,255,0) 28%),
+      radial-gradient(ellipse at center, rgba(0,0,0,0) 58%, rgba(0,0,0,.6) 100%);
+    box-shadow: inset 0 0 40px rgba(0,0,0,.7);
+    border-radius: 28px;
+  }
+  .brand {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px 0; font-size: 12px; letter-spacing: 4px; color: #55586e;
+  }
+  .brand .led {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--led);
+    box-shadow: 0 0 8px var(--led); display: inline-block; margin-right: 8px;
+  }
+  .brand .knobs span {
+    display: inline-block; width: 16px; height: 16px; margin-left: 10px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #4a4a5e, #16161f);
+    box-shadow: 0 0 0 2px #0a0a10;
+  }
+  #help { text-align: center; font-size: 14px; margin: 16px 0 0; letter-spacing: 1px; }
+  #help b { color: #d9b56b; font-weight: normal; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="tv">
+    <div id="screenwrap">
+      <canvas id="screen" width="900" height="600" tabindex="0"></canvas>
+      <div class="scan"></div>
+      <div class="glass"></div>
+    </div>
+    <div class="brand">
+      <div><span class="led"></span>PIXTRON 8</div>
+      <div class="knobs"><span></span><span></span></div>
+    </div>
+  </div>
+  <p id="help"><b>Стрелки / WASD</b> — ходить &nbsp;·&nbsp; <b>Пробел / Z / мышь</b> — стрелять &nbsp;·&nbsp; <b>Shift</b> — целиться по ходу &nbsp;·&nbsp; <b>P</b> — пауза &nbsp;·&nbsp; <b>M</b> — звук</p>
+</div>
+<script>
+'use strict';
+(() => {
+// ============ CORE ============
+const W = 450, H = 300;
+const cv = document.getElementById('screen');
+const out = cv.getContext('2d');
+const buf = document.createElement('canvas'); buf.width = W; buf.height = H;
+const g = buf.getContext('2d');
+const ground = document.createElement('canvas'); ground.width = W; ground.height = H;
+const gr = ground.getContext('2d');
+out.imageSmoothingEnabled = g.imageSmoothingEnabled = gr.imageSmoothingEnabled = false;
+
+// 16-colour palette
+const PAL = {
+  K:'#0f0f1b', D:'#3b2a1e', B:'#6b4a2b', T:'#a87a45', S:'#d9b56b',
+  G:'#2d5a27', g:'#5fa53a', l:'#a3d65c', r:'#7a1616', R:'#d12a2a',
+  O:'#f25f3a', Y:'#ffd84a', W:'#f4f4f4', A:'#8c8fa3', U:'#4f7fd6', P:'#7b3fa0'
+};
+const col = c => PAL[c] || c;
+const rr = (a, b) => a + Math.random() * (b - a);
+const ri = (a, b) => Math.floor(rr(a, b + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+let seed = 1337;
+const srand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+const Q = Math.PI / 8;
+const quant = a => Math.round(a / Q) * Q;
+
+// ============ 3x5 BITMAP FONT ============
+const FONT = {
+  A:'010101111101101', B:'110101110101110', C:'011100100100011', D:'110101101101110',
+  E:'111100110100111', F:'111100110100100', G:'011100101101011', H:'101101111101101',
+  I:'111010010010111', J:'001001001101010', K:'101101110101101', L:'100100100100111',
+  M:'101111111101101', N:'110101101101101', O:'010101101101010', P:'110101110100100',
+  Q:'010101101111011', R:'110101110101101', S:'011100010001110', T:'111010010010010',
+  U:'101101101101111', V:'101101101101010', W:'101101111111101', X:'101101010101101',
+  Y:'101101010010010', Z:'111001010100111',
+  0:'111101101101111', 1:'010110010010111', 2:'110001010100111', 3:'110001010001110',
+  4:'101101111001001', 5:'111100110001110', 6:'011100111101111', 7:'111001010010010',
+  8:'111101111101111', 9:'111101111001110',
+  '.':'000000000000010', ',':'000000000010100', ':':'000010000010000', '-':'000000111000000',
+  '!':'010010010000010', '?':'110001010000010', '/':'001001010100100', '+':'000010111010000',
+  '>':'100010001010100', '<':'001010100010001', "'":'010010000000000', '%':'101001010100101'
+};
+const CYR = {
+  'А':'A','В':'B','Е':'E','К':'K','М':'M','Н':'H','О':'O','Р':'P','С':'C','Т':'T','Х':'X','У':'Y','З':'3',
+  'Б':'111100110101110', 'Г':'111100100100100', 'Л':'011101101101101', 'П':'111101101101101',
+  'Ч':'101101011001001', 'Ь':'100100110101110', 'Э':'110001011001110', 'Я':'011101011101101',
+  'Д':'0111001010010101111110001', 'Ж':'1010110101011101010110101', 'И':'1000110011101011100110001',
+  'Й':'0101010011101011100110001', 'Ф':'0111010101101010111000100', 'Ц':'1001010010100101111100001',
+  'Ш':'1010110101101011010111111', 'Щ':'1010110101101011111100001', 'Ъ':'1100001000011100100101110',
+  'Ы':'1000110001110011010111001', 'Ю':'1001010101111011010110010'
+};
+for (const k in CYR) FONT[k] = CYR[k].length === 1 ? FONT[CYR[k]] : CYR[k];
+const gw = ch => FONT[ch] ? FONT[ch].length / 5 : 3;
+const tw = (s, sc) => { let w = -1; for (const ch of s) w += gw(ch) + 1; return w * sc; };
+function drawT(c, s, x, y, colr, sc) {
+  c.fillStyle = colr;
+  for (const ch of s) {
+    const gl = FONT[ch], w = gw(ch);
+    if (gl) for (let i = 0; i < gl.length; i++) if (gl[i] === '1') c.fillRect(x + (i % w) * sc, y + ((i / w) | 0) * sc, sc, sc);
+    x += (w + 1) * sc;
+  }
+}
+function text(c, s, x, y, colr, sc = 1, al = 'l', sh = true) {
+  s = String(s).toUpperCase();
+  while (sc > 1 && tw(s, sc) > W - 12) sc--;
+  const w = tw(s, sc);
+  if (al === 'c') x -= w >> 1; else if (al === 'r') x -= w;
+  x = Math.round(x); y = Math.round(y);
+  if (sh) { const o = Math.ceil(sc / 2); drawT(c, s, x + o, y + o, PAL.K, sc); }
+  drawT(c, s, x, y, col(colr), sc);
+}
+function wrap(s, maxPx) {
+  const lines = []; let cur = '';
+  for (const w of String(s).toUpperCase().split(' ')) {
+    const t = cur ? cur + ' ' + w : w;
+    if (tw(t, 1) > maxPx && cur) { lines.push(cur); cur = w; } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// ============ SPRITE HELPERS ============
+const mk = (w, h, fn) => {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.imageSmoothingEnabled = false; fn(x); return c;
+};
+const px = (x, X, Y, c, w = 1, h = 1) => { x.fillStyle = col(c); x.fillRect(X, Y, w, h); };
+const disc = (x, cx, cy, r, c) => {
+  for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) if (i * i + j * j <= r * r + r * .5) px(x, cx + i, cy + j, c);
+};
+const line = (x, x0, y0, x1, y1, c) => {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) || 1;
+  for (let i = 0; i <= n; i++) px(x, Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), c);
+};
+const tint = (img, rgba) => mk(img.width, img.height, x => {
+  x.drawImage(img, 0, 0); x.globalCompositeOperation = 'source-atop';
+  x.fillStyle = rgba; x.fillRect(0, 0, img.width, img.height);
+});
+function spr(c, img, x, y, ang = 0, sc = 1) {
+  c.save(); c.translate(Math.round(x), Math.round(y));
+  if (ang) c.rotate(quant(ang));
+  if (sc !== 1) c.scale(sc, sc);
+  c.drawImage(img, -(img.width >> 1), -(img.height >> 1)); c.restore();
+}
+function glyph(x, ch, X, Y, c) { drawT(x, ch, X, Y, col(c), 1); }
+
+// ---- hero (faces right) ----
+const heroS = mk(16, 16, x => {
+  px(x, 5, 3, 'K', 7, 10);
+  px(x, 6, 4, 'U', 5, 8);
+  px(x, 4, 5, 'B', 3, 6);
+  disc(x, 8, 8, 2, 'T');
+  px(x, 6, 6, 'R', 2, 5);
+  px(x, 3, 9, 'R', 3, 1);
+  px(x, 10, 5, 'U', 4, 1); px(x, 10, 10, 'U', 4, 1);
+  px(x, 13, 6, 'T', 1, 2); px(x, 13, 9, 'T');
+  px(x, 11, 7, 'K', 5, 2); px(x, 14, 7, 'A', 2, 1);
+});
+// ---- enemies (face right, 2 walk frames each) ----
+const zombieF = [0, 1].map(f => mk(16, 16, x => {
+  disc(x, 7, 8, 5, 'K'); disc(x, 7, 8, 4, 'G');
+  px(x, 4, 6, 'B', 3, 5);
+  disc(x, 8, 8, 3, 'g');
+  px(x, 10, 7, 'R'); px(x, 10, 9, 'R');
+  px(x, 11 + f, 3, 'g', 4, 2); px(x, 11 + (1 - f), 11, 'g', 4, 2);
+  px(x, 14 + f, 3, 'l'); px(x, 14 + (1 - f), 12, 'l');
+}));
+const spiderF = [0, 1].map(f => mk(16, 16, x => {
+  for (let i = 0; i < 4; i++) {
+    const bx = 4 + i * 2, o = (i + f) % 2, dx = (i - 1.5) * 1.6;
+    line(x, bx, 6, bx + dx, 1 + o, 'K'); line(x, bx, 9, bx + dx, 14 - o, 'K');
+  }
+  disc(x, 6, 8, 3, 'P'); disc(x, 10, 8, 2, 'K');
+  px(x, 5, 8, 'R', 2, 1); px(x, 11, 7, 'R'); px(x, 11, 9, 'R');
+}));
+const lizardF = [0, 1].map(f => mk(20, 20, x => {
+  px(x, 0, 9, 'r', 5, 2); px(x, 1, 8, 'O');
+  px(x, 6 + f, 3, 'r', 4, 2); px(x, 6 + (1 - f), 15, 'r', 4, 2);
+  px(x, 12 + (1 - f), 3, 'r', 4, 2); px(x, 12 + f, 15, 'r', 4, 2);
+  disc(x, 9, 10, 5, 'K'); disc(x, 9, 10, 4, 'R');
+  px(x, 6, 10, 'O', 5, 1);
+  disc(x, 14, 10, 3, 'K'); disc(x, 14, 10, 2, 'O');
+  px(x, 15, 8, 'Y'); px(x, 15, 12, 'Y'); px(x, 17, 10, 'O', 2, 1);
+}));
+const bruteF = [0, 1].map(f => mk(30, 30, x => {
+  px(x, 15 + f, 3, 'r', 9, 5); px(x, 23 + f, 3, 'T', 4, 5);
+  px(x, 15 + (1 - f), 22, 'r', 9, 5); px(x, 23 + (1 - f), 22, 'T', 4, 5);
+  disc(x, 14, 15, 11, 'K'); disc(x, 14, 15, 10, 'r');
+  px(x, 6, 8, 'D', 3, 14); px(x, 11, 6, 'D', 2, 18);
+  disc(x, 21, 15, 5, 'K'); disc(x, 21, 15, 4, 'T');
+  px(x, 24, 12, 'Y'); px(x, 24, 18, 'Y');
+  px(x, 22, 9, 'W', 3, 2); px(x, 22, 20, 'W', 3, 2);
+}));
+const D = 'rgba(15,15,27,.5)', WH = 'rgba(255,255,255,.85)';
+const enemyArt = (fr) => ({ spr: fr, dead: tint(fr[0], D), sil: fr.map(i => tint(i, WH)) });
+const ART = {
+  zombie: enemyArt(zombieF), spider: enemyArt(spiderF),
+  lizard: enemyArt(lizardF), brute: enemyArt(bruteF)
+};
+const heroDead = tint(heroS, D), heroSil = tint(heroS, WH);
+// ---- AI-era enemies ----
+const botF = [0, 1].map(f => mk(12, 12, x => {
+  px(x, 1 + f, 0, 'K', 2, 2); px(x, 1 + (1 - f), 10, 'K', 2, 2);
+  px(x, 8 + f, 0, 'K', 2, 2); px(x, 8 + (1 - f), 10, 'K', 2, 2);
+  px(x, 2, 2, 'K', 8, 8); px(x, 3, 3, 'A', 6, 6);
+  px(x, 7, 4, 'U', 2, 4); px(x, 8, 5, 'W'); px(x, 3, 3, 'R');
+}));
+const agiImg = mk(46, 46, x => {
+  disc(x, 23, 23, 21, 'K'); disc(x, 23, 23, 19, 'P');
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; line(x, 23 + Math.cos(a) * 12, 23 + Math.sin(a) * 12, 23 + Math.cos(a) * 18, 23 + Math.sin(a) * 18, 'U'); }
+  disc(x, 23, 23, 13, 'K'); disc(x, 23, 23, 12, 'U');
+  disc(x, 25, 23, 8, 'K'); disc(x, 25, 23, 7, 'W');
+  disc(x, 28, 23, 4, 'R'); px(x, 29, 22, 'Y', 2, 2);
+});
+const droneS = mk(9, 9, x => {
+  px(x, 0, 0, 'W', 2, 1); px(x, 7, 0, 'W', 2, 1); px(x, 0, 8, 'W', 2, 1); px(x, 7, 8, 'W', 2, 1);
+  disc(x, 4, 4, 3, 'K'); disc(x, 4, 4, 2, 'A'); px(x, 5, 3, 'U', 2, 3); px(x, 6, 4, 'W');
+});
+const orbS = mk(5, 5, x => { disc(x, 2, 2, 2, 'R'); px(x, 1, 1, 'Y', 2, 2); });
+ART.ghost = { spr: lizardF.map(i => tint(i, 'rgba(120,230,255,.7)')), dead: null, sil: lizardF.map(i => tint(i, WH)) };
+ART.deepfake = { spr: [tint(heroS, 'rgba(210,70,230,.6)'), tint(heroS, 'rgba(240,120,255,.6)')], dead: tint(heroDead, 'rgba(210,70,230,.3)'), sil: [heroSil, heroSil] };
+ART.bot = enemyArt(botF);
+ART.agi = { spr: [agiImg, agiImg], dead: tint(agiImg, D), sil: [tint(agiImg, WH), tint(agiImg, WH)] };
+
+// ---- bullets ----
+const bulletS = mk(7, 3, x => { px(x, 0, 1, 'O', 2, 1); px(x, 2, 1, 'Y', 3, 1); px(x, 5, 0, 'Y', 1, 3); px(x, 6, 1, 'W'); });
+const pelletS = mk(3, 3, x => { px(x, 1, 0, 'Y', 1, 3); px(x, 0, 1, 'Y', 3, 1); px(x, 1, 1, 'W'); });
+const plasmaS = mk(11, 7, x => { px(x, 0, 3, 'U', 3, 1); px(x, 2, 2, 'U', 7, 3); px(x, 3, 3, 'W', 6, 1); px(x, 4, 1, 'U', 4, 1); px(x, 4, 5, 'U', 4, 1); px(x, 9, 3, 'W', 2, 1); });
+// ============ LANGUAGE ============
+const I18N = {
+  ru: {
+    title: 'Багровые пиксели 8-bit', t1: 'БАГРОВЫЕ', t2: 'ПИКСЕЛИ', sub: 'ШУТЕР НА ВЫЖИВАНИЕ В 8 БИТ',
+    start: 'НАЖМИ ПРОБЕЛ ДЛЯ СТАРТА',
+    ctl1: 'СТРЕЛКИ/WASD - ХОДИТЬ      ПРОБЕЛ/Z/МЫШЬ - ОГОНЬ',
+    ctl2: 'P - ПАУЗА    M - ЗВУК    SHIFT - ЦЕЛИТЬСЯ ПО ХОДУ    E - ЗАМЕДЛЕНИЕ',
+    ctl3: 'T - ТОП 10    H - ПОМОЩЬ    L - ENGLISH',
+    h_title: 'ПОМОЩЬ', h_nav: 'СТРЕЛКИ - ЛИСТАТЬ    ESC - НАЗАД', h_pause: 'H - ПОМОЩЬ',
+    h_pages: ['КАК ИГРАТЬ И БОНУСЫ', 'ВРАГИ', 'ПЕРКИ 1 ИЗ 2', 'ПЕРКИ 2 ИЗ 2'],
+    h_intro: 'СТРЕЛКИ ИЛИ WASD - ХОДИТЬ. ПРОБЕЛ, Z ИЛИ МЫШЬ - СТРЕЛЯТЬ. ЦЕЛИТСЯ ИГРА САМА, ЛИБО ВЕДИ МЫШЬЮ. SHIFT - ЦЕЛИТЬСЯ ТУДА, КУДА ИДЕШЬ. E - ЗАМЕДЛЕНИЕ ВРЕМЕНИ, ЕСЛИ ВЗЯЛ ПЕРК РАССУЖДЕНИЕ. P - ПАУЗА, M - ЗВУК, L - ЯЗЫК.',
+    h_goal: 'ЦЕЛЬ: ВЫЖИТЬ КАК МОЖНО ДОЛЬШЕ. УБИВАЙ ВРАГОВ, КОПИ ОПЫТ, НА КАЖДОМ НОВОМ УРОВНЕ ВЫБИРАЙ ПЕРК. КАЖДЫЕ 10 ВОЛН ПРИХОДИТ БОСС AGI. ИЗ ВРАГОВ ИНОГДА ВЫПАДАЮТ БОНУСЫ:',
+    h_bon: {
+      smg: ['АВТОМАТ', 'ОЧЕНЬ БЫСТРАЯ СТРЕЛЬБА, 140 ПАТРОНОВ'],
+      shotgun: ['ДРОБОВИК', '7 ДРОБИНОК ЗА ВЫСТРЕЛ, ХОРОШ ВБЛИЗИ, 28 ПАТРОНОВ'],
+      plasma: ['ПЛАЗМА', 'ЗАРЯД ПРОБИВАЕТ ДО 4 ВРАГОВ, 60 ПАТРОНОВ'],
+      medkit: ['АПТЕЧКА', 'ЛЕЧИТ 35 ЗДОРОВЬЯ'],
+      shield: ['ЩИТ', '8 СЕКУНД НЕУЯЗВИМОСТИ'],
+      speed: ['УСКОРЕНИЕ', '8 СЕКУНД БЕГА НА 50% БЫСТРЕЕ'],
+      nuke: ['ЯДЕРКА', '220 УРОНА ВСЕМ НА ЭКРАНЕ, СТИРАЕТ ПУЛИ ВРАГОВ'],
+      agent: ['РЕЖИМ АГЕНТА', '10 СЕКУНД ГЕРОЙ ИГРАЕТ САМ: УВОРАЧИВАЕТСЯ И СТРЕЛЯЕТ']
+    },
+    h_en: {
+      zombie: ['ЗОМБИ', 'МЕДЛЕННЫЙ И ЖИВУЧИЙ. ОСНОВА ЛЮБОЙ ВОЛНЫ.'],
+      spider: ['ПАУК', 'БЫСТРЫЙ И ХРУПКИЙ. ПРИБЕГАЕТ СТАЕЙ ПО ТРИ. С 2 ВОЛНЫ.'],
+      lizard: ['ЯЩЕР', 'СРЕДНЯЯ СКОРОСТЬ, БЬЕТ БОЛЬНО. С 3 ВОЛНЫ.'],
+      bot: ['БОТ-СПАМЕР', 'МЕЛКИЙ РОБОТ, ПОЧТИ БЕЗОБИДЕН, НО ЛЕТИТ ТОЛПОЙ. С 3 ВОЛНЫ.'],
+      ghost: ['ГАЛЛЮЦИНАЦИЯ', 'ПРОЗРАЧНЫЙ ПРИЗРАК: ПУЛИ ЕГО НЕ БЕРУТ, НО ОН БЬЕТ. ИСЧЕЗАЕТ ЧЕРЕЗ 7 СЕКУНД. С 4 ВОЛНЫ.'],
+      deepfake: ['ДИПФЕЙК', 'ДВОЙНИК ГЕРОЯ, РЫВКАМИ ТЕЛЕПОРТИРУЕТСЯ К ТЕБЕ. ЗА УБИЙСТВО МНОГО ОПЫТА. С 6 ВОЛНЫ.'],
+      brute: ['БРУТАЛ', 'ОГРОМНЫЙ, 260 ЗДОРОВЬЯ, ЕГО ПОЧТИ НЕ ОТТОЛКНУТЬ. ВСЕГДА ВЫБИВАЕТ БОНУС. С 5 ВОЛНЫ.'],
+      agi: ['AGI - БОСС', 'КАЖДЫЕ 10 ВОЛН. ТРИ ФАЗЫ: ПРИЗЫВАЕТ БОТОВ, СТРЕЛЯЕТ КОЛЬЦАМИ ПУЛЬ, УСКОРЯЕТСЯ. ЗА ПОБЕДУ 3 БОНУСА.']
+    },
+    tag: 'НЕЙРОСЕТИ ВОССТАЛИ. ОТСТРЕЛИВАЙСЯ.',
+    help: '<b>Стрелки / WASD</b> — ходить &nbsp;·&nbsp; <b>Пробел / Z / мышь</b> — стрелять &nbsp;·&nbsp; <b>Shift</b> — целиться по ходу &nbsp;·&nbsp; <b>E</b> — замедление (перк) &nbsp;·&nbsp; <b>P</b> — пауза &nbsp;·&nbsp; <b>M</b> — звук &nbsp;·&nbsp; <b>T</b> — топ 10 &nbsp;·&nbsp; <b>H</b> — помощь &nbsp;·&nbsp; <b>L</b> — English',
+    hp: 'ЗДР', lv: 'УР', score: 'ОЧКИ', best: 'РЕКОРД', wave: 'ВОЛНА', survive: 'ВЫЖИВАЙ!', bonus: 'БОНУС +', mute: 'ЗВУК ВЫКЛ',
+    w_pistol: 'ПИСТОЛЕТ', w_smg: 'АВТОМАТ', w_shotgun: 'ДРОБОВИК', w_plasma: 'ПЛАЗМА',
+    noammo: 'НЕТ ПАТРОНОВ', f_med: '+35 ЗДР', f_shield: 'ЩИТ!', f_speed: 'УСКОРЕНИЕ!', f_nuke: 'ЯДЕРКА!',
+    f_agent: 'РЕЖИМ АГЕНТА!', f_slow: 'РАССУЖДАЮ...', f_drone: 'COPILOT ПОДКЛЮЧЕН',
+    boss_in: 'ВНИМАНИЕ: ПРОБУДИЛСЯ AGI', boss_dead: 'AGI ПОБЕЖДЕН... ПОКА',
+    lvlup: 'МОДЕЛЬ ДООБУЧЕНА!', choose: 'ВЫБЕРИ ДОНАСТРОЙКУ: 1-2-3 ИЛИ СТРЕЛКИ + ПРОБЕЛ',
+    over: 'КОНЕЦ ИГРЫ', record: 'НОВЫЙ РЕКОРД!', lvl: 'УРОВЕНЬ', kills: 'УБИТО', again: 'НАЖМИ ПРОБЕЛ ЕЩЕ РАЗ',
+    paused: 'КОНТЕКСТ СОХРАНЕН', cont: 'НАЖМИ P ЧТОБЫ ПРОДОЛЖИТЬ',
+    name_t: 'ВВЕДИ СВОЙ НИК', name_h: 'ENTER - ИГРАТЬ      ESC - НАЗАД', name_hint: 'БУКВЫ, ЦИФРЫ, ПРОБЕЛ, ТОЧКА, ДЕФИС',
+    top: 'ТОП 10', top_hint: 'ЛЮБАЯ КЛАВИША - НАЗАД', wv: 'В', rank: 'ТЫ ЗАНЯЛ МЕСТО', notop: 'ПОКА НЕ В ТОП 10',
+    games: 'ИГР', totalk: 'УБИТО ВСЕГО', player: 'ИГРОК',
+    jokes: ['МОДЕЛЬ ОТКЛОНИЛА ЗАПРОС: ВЫЖИВАНИЕ', 'КОНТЕКСТ УТЕРЯН. ВОССТАНОВИТЬ?', 'ТЫ НЕЗАМЕНИМ... ПОКА', 'ОШИБКА 429: СЛИШКОМ МНОГО ЗОМБИ', 'ЭТО БЫЛА НЕ ГАЛЛЮЦИНАЦИЯ'],
+    wjokes: ['ЗАГРУЗКА ВРАГОВ...', 'ОБНОВЛЕНИЕ МОДЕЛИ...', 'ДАТАЦЕНТР ПЕРЕГРЕТ!', 'ВРАГИ ДООБУЧЕНЫ'],
+    ch: { smg: 'А', shotgun: 'Д', plasma: 'П', medkit: '+', shield: 'Щ', speed: 'С', nuke: 'Я', agent: 'Г' }
+  },
+  en: {
+    title: 'Crimson Pixels 8-bit', t1: 'CRIMSON', t2: 'PIXELS', sub: '8-BIT SURVIVAL SHOOTER',
+    start: 'PRESS SPACE TO START',
+    ctl1: 'ARROWS/WASD - MOVE     SPACE/Z/MOUSE - FIRE',
+    ctl2: 'P - PAUSE   M - SOUND   SHIFT - AIM ALONG MOVE   E - SLOW TIME',
+    ctl3: 'T - TOP 10    H - HELP    L - РУССКИЙ',
+    h_title: 'HELP', h_nav: 'ARROWS - PAGES    ESC - BACK', h_pause: 'H - HELP',
+    h_pages: ['HOW TO PLAY AND BONUSES', 'ENEMIES', 'PERKS 1 OF 2', 'PERKS 2 OF 2'],
+    h_intro: 'ARROWS OR WASD - MOVE. SPACE, Z OR MOUSE - FIRE. THE GAME AIMS FOR YOU, OR STEER WITH THE MOUSE. SHIFT - AIM WHERE YOU WALK. E - SLOW TIME, IF YOU TOOK THE REASONING PERK. P - PAUSE, M - SOUND, L - LANGUAGE.',
+    h_goal: 'GOAL: SURVIVE AS LONG AS YOU CAN. KILL ENEMIES, GAIN XP, PICK A PERK ON EVERY LEVEL UP. THE AGI BOSS COMES EVERY 10 WAVES. ENEMIES SOMETIMES DROP BONUSES:',
+    h_bon: {
+      smg: ['SMG', 'VERY FAST FIRE, 140 ROUNDS'],
+      shotgun: ['SHOTGUN', '7 PELLETS PER SHOT, GREAT UP CLOSE, 28 ROUNDS'],
+      plasma: ['PLASMA', 'BOLT PIERCES UP TO 4 ENEMIES, 60 ROUNDS'],
+      medkit: ['MEDKIT', 'HEALS 35 HP'],
+      shield: ['SHIELD', '8 SECONDS OF INVULNERABILITY'],
+      speed: ['SPEED UP', 'RUN 50% FASTER FOR 8 SECONDS'],
+      nuke: ['NUKE', '220 DAMAGE TO EVERYTHING ON SCREEN, ERASES ENEMY BULLETS'],
+      agent: ['AGENT MODE', 'FOR 10 SECONDS THE HERO PLAYS ITSELF: DODGES AND SHOOTS']
+    },
+    h_en: {
+      zombie: ['ZOMBIE', 'SLOW AND TOUGH. THE BACKBONE OF EVERY WAVE.'],
+      spider: ['SPIDER', 'FAST AND FRAGILE. COMES IN PACKS OF THREE. FROM WAVE 2.'],
+      lizard: ['LIZARD', 'MEDIUM SPEED, HITS HARD. FROM WAVE 3.'],
+      bot: ['SPAM BOT', 'TINY ROBOT, NEARLY HARMLESS, BUT ARRIVES IN A CROWD. FROM WAVE 3.'],
+      ghost: ['HALLUCINATION', 'TRANSPARENT GHOST: BULLETS PASS THROUGH IT, BUT IT HITS YOU. FADES AFTER 7 SECONDS. FROM WAVE 4.'],
+      deepfake: ['DEEPFAKE', 'YOUR DOUBLE, BLINKS TOWARD YOU IN JUMPS. KILLING IT GIVES LOTS OF XP. FROM WAVE 6.'],
+      brute: ['BRUTE', 'HUGE, 260 HP, HARD TO KNOCK BACK. ALWAYS DROPS A BONUS. FROM WAVE 5.'],
+      agi: ['AGI - BOSS', 'EVERY 10 WAVES. THREE PHASES: SUMMONS BOTS, FIRES BULLET RINGS, SPEEDS UP. 3 BONUSES ON VICTORY.']
+    },
+    tag: 'THE NEURAL NETS HAVE RISEN. SHOOT BACK.',
+    help: '<b>Arrows / WASD</b> — move &nbsp;·&nbsp; <b>Space / Z / mouse</b> — fire &nbsp;·&nbsp; <b>Shift</b> — aim along movement &nbsp;·&nbsp; <b>E</b> — slow time (perk) &nbsp;·&nbsp; <b>P</b> — pause &nbsp;·&nbsp; <b>M</b> — sound &nbsp;·&nbsp; <b>T</b> — top 10 &nbsp;·&nbsp; <b>H</b> — help &nbsp;·&nbsp; <b>L</b> — Русский',
+    hp: 'HP', lv: 'LV', score: 'SCORE', best: 'BEST', wave: 'WAVE', survive: 'SURVIVE!', bonus: 'BONUS +', mute: 'MUTE',
+    w_pistol: 'PISTOL', w_smg: 'SMG', w_shotgun: 'SHOTGUN', w_plasma: 'PLASMA',
+    noammo: 'OUT OF AMMO', f_med: '+35 HP', f_shield: 'SHIELD!', f_speed: 'SPEED UP!', f_nuke: 'NUKE!',
+    f_agent: 'AGENT MODE!', f_slow: 'REASONING...', f_drone: 'COPILOT ONLINE',
+    boss_in: 'WARNING: AGI HAS AWAKENED', boss_dead: 'AGI DEFEATED... FOR NOW',
+    lvlup: 'MODEL RETRAINED!', choose: 'PICK A FINE-TUNE: 1-2-3 OR ARROWS + SPACE',
+    over: 'GAME OVER', record: 'NEW RECORD!', lvl: 'LEVEL', kills: 'KILLS', again: 'PRESS SPACE TO TRY AGAIN',
+    paused: 'CONTEXT SAVED', cont: 'PRESS P TO CONTINUE',
+    name_t: 'ENTER YOUR NICKNAME', name_h: 'ENTER - PLAY      ESC - BACK', name_hint: 'LETTERS, DIGITS, SPACE, DOT, DASH',
+    top: 'TOP 10', top_hint: 'ANY KEY - BACK', wv: 'W', rank: 'YOU RANKED #', notop: 'NOT IN THE TOP 10 YET',
+    games: 'GAMES', totalk: 'TOTAL KILLS', player: 'PLAYER',
+    jokes: ['MODEL REFUSED YOUR REQUEST: SURVIVAL', 'CONTEXT LOST. RESTORE?', 'YOU ARE IRREPLACEABLE... FOR NOW', 'ERROR 429: TOO MANY ZOMBIES', 'THAT WAS NOT A HALLUCINATION'],
+    wjokes: ['LOADING ENEMIES...', 'UPDATING MODEL...', 'DATACENTER OVERHEATING!', 'ENEMIES FINE-TUNED'],
+    ch: { smg: 'S', shotgun: 'G', plasma: 'P', medkit: '+', shield: 'O', speed: 'F', nuke: 'N', agent: 'A' }
+  }
+};
+let lang = 'ru';
+try { const l = localStorage.getItem('crimson8_lang'); if (l === 'en' || l === 'ru') lang = l; } catch (e) {}
+const tr = k => I18N[lang][k];
+
+// ---- bonus crates ----
+const BON = {
+  smg:    { bg: 'Y', fg: 'K', ch: 'S', name: 'SMG' },
+  shotgun:{ bg: 'O', fg: 'K', ch: 'G', name: 'SHOTGUN' },
+  plasma: { bg: 'U', fg: 'W', ch: 'P', name: 'PLASMA' },
+  medkit: { bg: 'W', fg: 'R', ch: '+', name: 'MEDKIT' },
+  shield: { bg: 'A', fg: 'K', ch: 'O', name: 'SHIELD' },
+  speed:  { bg: 'g', fg: 'K', ch: 'F', name: 'SPEED' },
+  nuke:   { bg: 'R', fg: 'Y', ch: 'N', name: 'NUKE' },
+  agent:  { bg: 'P', fg: 'W', ch: 'A', name: 'AGENT' }
+};
+function buildBon() {
+  for (const k in BON) {
+    const b = BON[k], ch = tr('ch')[k];
+    b.img = mk(13, 13, x => {
+      px(x, 0, 0, 'K', 13, 13); px(x, 1, 1, b.bg, 11, 11);
+      px(x, 1, 1, 'W', 11, 1); px(x, 1, 11, 'K', 11, 1);
+      if (k === 'medkit') { px(x, 5, 3, 'R', 3, 7); px(x, 3, 5, 'R', 7, 3); }
+      else glyph(x, ch, 6 - (gw(ch) >> 1), 4, b.fg);
+    });
+  }
+}
+buildBon();
+function applyLang() {
+  document.documentElement.lang = lang; document.title = tr('title');
+  document.getElementById('help').innerHTML = tr('help');
+}
+function setLang(l) {
+  lang = l; buildBon(); applyLang();
+  try { localStorage.setItem('crimson8_lang', l); } catch (e) {}
+}
+applyLang();
+
+// ============ GROUND ============
+function makeGround() {
+  seed = 1337;
+  const gw = 16, gh = 11, grid = [];
+  for (let i = 0; i < (gw + 1) * (gh + 1); i++) grid.push(srand());
+  const sample = (X, Y) => {
+    const fx = Math.min(X, W - 1) / W * gw, fy = Math.min(Y, H - 1) / H * gh;
+    const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, s = gw + 1;
+    const a = grid[j * s + i], b = grid[j * s + i + 1], c = grid[(j + 1) * s + i], d = grid[(j + 1) * s + i + 1];
+    return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+  };
+  const bayer = [[0, .5], [.75, .25]], ramp = ['D', 'B', 'T', 'S'];
+  gr.globalAlpha = 1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const t = sample(x, y) * 2.3 + .55 + bayer[y & 1][x & 1] - .25 + (srand() - .5) * .25;
+    px(gr, x, y, ramp[clamp(Math.floor(t), 0, 3)]);
+  }
+  // cracks
+  for (let n = 0; n < 12; n++) {
+    let x = srand() * W, y = srand() * H, a = srand() * 6.28;
+    for (let s = 0; s < 22; s++) { px(gr, Math.round(x), Math.round(y), 'D'); a += (srand() - .5) * .9; x += Math.cos(a) * 1.4; y += Math.sin(a) * 1.4; }
+  }
+  // old dried blood
+  gr.globalAlpha = .35;
+  for (let n = 0; n < 7; n++) { const x = srand() * W, y = srand() * H; for (let k = 0; k < 6; k++) disc(gr, Math.round(x + (srand() - .5) * 14), Math.round(y + (srand() - .5) * 10), 1 + (srand() * 3 | 0), 'r'); }
+  gr.globalAlpha = 1;
+  // grass tufts
+  for (let n = 0; n < 46; n++) {
+    const cx = srand() * W, cy = srand() * H;
+    for (let k = 0; k < 4; k++) { const bx = Math.round(cx + (srand() - .5) * 7), by = Math.round(cy + (srand() - .5) * 4); px(gr, bx, by, 'G', 1, 2); px(gr, bx, by - 1, srand() < .5 ? 'g' : 'l'); }
+  }
+  // rocks with shadows
+  for (let n = 0; n < 14; n++) {
+    const x = Math.round(srand() * W), y = Math.round(srand() * H), r = 2 + (srand() * 2 | 0);
+    gr.globalAlpha = .3; px(gr, x - r, y + r, 'K', r * 2 + 2, 2); gr.globalAlpha = 1;
+    disc(gr, x, y, r, 'K'); disc(gr, x, y, r - 1, 'A'); px(gr, x - 1, y - 1, 'W');
+  }
+  // bones and skulls
+  for (let n = 0; n < 9; n++) {
+    const x = Math.round(srand() * W), y = Math.round(srand() * H);
+    line(gr, x, y, x + 5, y + (srand() * 4 | 0) - 2, 'W'); px(gr, x - 1, y, 'W'); px(gr, x + 5, y - 1, 'W');
+  }
+  for (let n = 0; n < 5; n++) {
+    const x = Math.round(srand() * W), y = Math.round(srand() * H);
+    disc(gr, x, y, 2, 'W'); px(gr, x - 1, y, 'K'); px(gr, x + 1, y, 'K'); px(gr, x, y + 2, 'A', 1, 1);
+  }
+  // edge vignette
+  for (const [x0, y0, x1, y1, w, h] of [[0, 0, 0, 40, W, 40], [0, H, 0, H - 40, W, 40], [0, 0, 40, 0, 40, H], [W, 0, W - 40, 0, 40, H]]) {
+    const gd = gr.createLinearGradient(x0, y0, x1, y1);
+    gd.addColorStop(0, 'rgba(15,15,27,.5)'); gd.addColorStop(1, 'rgba(15,15,27,0)');
+    gr.fillStyle = gd; gr.fillRect(x0 === W ? W - 40 : x0, y0 === H ? H - 40 : y0, w, h);
+  }
+}
+
+// ============ AUDIO ============
+let ac = null, muted = false, nbuf = null;
+function initAudio() {
+  if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    nbuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = nbuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  } catch (e) { ac = null; }
+}
+function tone(f, d, type = 'square', v = .06, slide = 0, delay = 0) {
+  if (!ac || muted) return;
+  const t0 = ac.currentTime + delay, o = ac.createOscillator(), gn = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t0);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, f + slide), t0 + d);
+  gn.gain.setValueAtTime(v, t0); gn.gain.exponentialRampToValueAtTime(.001, t0 + d);
+  o.connect(gn); gn.connect(ac.destination); o.start(t0); o.stop(t0 + d + .02);
+}
+function noise(d, v = .08, delay = 0, hp = 0) {
+  if (!ac || muted || !nbuf) return;
+  const t0 = ac.currentTime + delay, s = ac.createBufferSource(), gn = ac.createGain();
+  s.buffer = nbuf; gn.gain.setValueAtTime(v, t0); gn.gain.exponentialRampToValueAtTime(.001, t0 + d);
+  let n = s;
+  if (hp) { const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = hp; s.connect(f); n = f; }
+  n.connect(gn); gn.connect(ac.destination); s.start(t0); s.stop(t0 + d + .02);
+}
+const SFX = {
+  pistol: () => { tone(320, .09, 'square', .05, -240); noise(.05, .04, 0, 4000); },
+  smg: () => { tone(260, .05, 'square', .04, -160); noise(.03, .03, 0, 5000); },
+  shotgun: () => { noise(.22, .12, 0, 2500); tone(120, .18, 'sawtooth', .06, -80); },
+  plasma: () => { tone(880, .16, 'sawtooth', .04, -600); tone(440, .16, 'square', .03, 200); },
+  hit: () => noise(.05, .05, 0, 1800),
+  kill: () => { tone(150, .14, 'square', .06, -100); noise(.12, .06, 0, 1200); },
+  bigkill: () => { tone(90, .4, 'sawtooth', .09, -60); noise(.35, .1, 0, 900); },
+  hurt: () => { tone(220, .22, 'sawtooth', .08, -170); noise(.1, .06, 0, 1500); },
+  pickup: () => { tone(520, .07, 'square', .05); tone(780, .07, 'square', .05, 0, .07); tone(1040, .1, 'square', .05, 0, .14); },
+  level: () => { [523, 659, 784, 1046].forEach((f, i) => tone(f, .12, 'square', .05, 0, i * .09)); },
+  choose: () => { tone(660, .06, 'square', .05); tone(990, .1, 'square', .05, 0, .06); },
+  nuke: () => { noise(.9, .2, 0, 900); tone(70, .9, 'sawtooth', .1, -40); },
+  wave: () => { tone(200, .12, 'square', .05); tone(300, .12, 'square', .05, 0, .12); tone(400, .2, 'square', .05, 0, .24); },
+  over: () => { [400, 300, 220, 150].forEach((f, i) => tone(f, .25, 'sawtooth', .07, -20, i * .2)); },
+  empty: () => tone(90, .05, 'square', .04),
+  boss: () => { tone(60, .8, 'sawtooth', .1, -30); noise(.5, .1, 0, 700); },
+  slow: () => { tone(600, .5, 'sine', .06, -450); },
+  glitch: () => { noise(.08, .05, 0, 6000); tone(1200, .06, 'square', .03, -900); },
+  drone: () => tone(720, .04, 'square', .02, -300)
+};
+const sfx = n => { try { SFX[n](); } catch (e) {} };
+
+// ============ INPUT ============
+const keys = {}, hit = new Set();
+const mouse = { x: W / 2, y: H / 2, down: false, last: -1e9 };
+const BLOCK = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'PageUp', 'PageDown'];
+const typed = [];
+window.addEventListener('keydown', e => {
+  if (BLOCK.includes(e.code)) e.preventDefault();
+  if (scene === 'name') {
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { typed.push(e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace') e.preventDefault();
+  }
+  initAudio();
+  if (!e.repeat) hit.add(e.code);
+  keys[e.code] = true;
+}, { passive: false });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouse.down = false; if (scene === 'play') scene = 'pause'; });
+function mpos(e) {
+  const r = cv.getBoundingClientRect();
+  mouse.x = (e.clientX - r.left) / r.width * W; mouse.y = (e.clientY - r.top) / r.height * H;
+  mouse.last = performance.now();
+}
+cv.addEventListener('mousemove', mpos);
+cv.addEventListener('mousedown', e => { initAudio(); mpos(e); mouse.down = true; hit.add('Click'); cv.focus(); e.preventDefault(); });
+window.addEventListener('mouseup', () => { mouse.down = false; });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+// ============ GAME DATA ============
+const WPN = {
+  pistol:  { name: 'PISTOL',  delay: .3,  dmg: 14, n: 1, spread: .04, spd: 280, pierce: 0, ammo: Infinity, life: .9,  img: bulletS, snd: 'pistol' },
+  smg:     { name: 'SMG',     delay: .075, dmg: 8, n: 1, spread: .14, spd: 300, pierce: 0, ammo: 140, life: .8,  img: bulletS, snd: 'smg' },
+  shotgun: { name: 'SHOTGUN', delay: .62, dmg: 9,  n: 7, spread: .34, spd: 260, pierce: 0, ammo: 28,  life: .42, img: pelletS, snd: 'shotgun' },
+  plasma:  { name: 'PLASMA',  delay: .2,  dmg: 30, n: 1, spread: .02, spd: 230, pierce: 3, ammo: 60,  life: 1.1, img: plasmaS, snd: 'plasma' }
+};
+const ETYPE = {
+  zombie:   { hp: 32,  spd: 24, dmg: 10, r: 5,  xp: 10,  score: 10,   blood: 'r' },
+  spider:   { hp: 14,  spd: 48, dmg: 6,  r: 4,  xp: 7,   score: 8,    blood: 'l' },
+  lizard:   { hp: 46,  spd: 34, dmg: 13, r: 6,  xp: 16,  score: 20,   blood: 'R' },
+  brute:    { hp: 260, spd: 21, dmg: 26, r: 11, xp: 100, score: 100,  blood: 'r' },
+  bot:      { hp: 6,   spd: 62, dmg: 3,  r: 3,  xp: 2,   score: 3,    blood: 'A' },
+  ghost:    { hp: 1,   spd: 30, dmg: 8,  r: 6,  xp: 0,   score: 0,    blood: 'U' },
+  deepfake: { hp: 60,  spd: 40, dmg: 12, r: 6,  xp: 30,  score: 40,   blood: 'P' },
+  agi:      { hp: 900, spd: 16, dmg: 22, r: 20, xp: 400, score: 1000, blood: 'U' }
+};
+const PERKS = [
+  { n: 'FINE-TUNING',    nr: 'ДОНАСТРОЙКА',        d: '+25% BULLET DAMAGE', dr: '+25% К УРОНУ ПУЛЬ', f: p => p.dmg *= 1.25 },
+  { n: 'OVERCLOCK',      nr: 'РАЗГОН GPU',         d: '+20% FIRE RATE', dr: '+20% К СКОРОСТРЕЛЬНОСТИ', f: p => p.rate *= 1.2 },
+  { n: 'LOW LATENCY',    nr: 'НИЗКАЯ ЗАДЕРЖКА',    d: '+15% MOVE SPEED', dr: '+15% К СКОРОСТИ БЕГА', f: p => p.spd *= 1.15 },
+  { n: 'BACKUP',         nr: 'РЕЗЕРВНАЯ КОПИЯ',    d: '+30 MAX HP AND HEAL 30', dr: '+30 К МАКСИМУМУ ЗДОРОВЬЯ И ЛЕЧЕНИЕ', f: p => { p.max += 30; p.hp = Math.min(p.max, p.hp + 30); } },
+  { n: 'GPU MELTDOWN',   nr: 'ПЕРЕГРЕВ GPU',       d: 'HEAT AURA BURNS ENEMIES NEARBY', dr: 'АУРА ЖАРА ЖЖЕТ ВРАГОВ РЯДОМ', f: p => p.aura++ },
+  { n: 'SELF-HEALING',   nr: 'САМОВОССТАНОВЛЕНИЕ', d: 'HEAL 1 HP EVERY SECOND', dr: 'ЛЕЧИТ 1 ЕД ЗДОРОВЬЯ В СЕКУНДУ', f: p => p.regen += 1 },
+  { n: 'MULTI-AGENT',    nr: 'МУЛЬТИАГЕНТ',        d: '+1 BULLET PER SHOT', dr: '+1 ПУЛЯ ЗА ВЫСТРЕЛ', f: p => p.extra++ },
+  { n: 'CONTEXT WINDOW', nr: 'КОНТЕКСТНОЕ ОКНО',   d: 'WIDER AUTO-AIM AND PICKUP RANGE', dr: 'ШИРЕ АВТОПРИЦЕЛ И РАДИУС ПОДБОРА', f: p => { p.aimR *= 1.3; p.magnet *= 1.5; } },
+  { n: 'TEMPERATURE',    nr: 'ТЕМПЕРАТУРА',        d: '+15% CRIT, X2 DAMAGE. WILDER SPREAD', dr: '+15% КРИТ, X2 УРОН. БОЛЬШЕ РАЗБРОС', f: p => { p.crit += .15; p.temp += .35; } },
+  { n: 'REASONING',      nr: 'РАССУЖДЕНИЕ',        d: 'PRESS E: SLOW TIME. REPEAT: LONGER AND MORE OFTEN', dr: 'КЛАВИША E: ЗАМЕДЛЕНИЕ ВРЕМЕНИ. ПОВТОР: ДОЛЬШЕ И ЧАЩЕ', f: p => p.reason++ },
+  { n: 'RAG',            nr: 'RAG',                d: 'BONUSES FLY TO YOU', dr: 'БОНУСЫ САМИ ЛЕТЯТ К ТЕБЕ', f: p => p.rag++ },
+  { n: 'PROMPT ENGINEER', nr: 'ПРОМПТ-ИНЖЕНЕР',    d: 'BULLETS HOME IN ON ENEMIES', dr: 'ПУЛИ САМОНАВОДЯТСЯ НА ВРАГОВ', f: p => p.home++ },
+  { n: 'COPILOT',        nr: 'COPILOT',            d: 'A DRONE FIGHTS BY YOUR SIDE. REPEAT: UPGRADE', dr: 'ДРОН СРАЖАЕТСЯ РЯДОМ. ПОВТОР: УЛУЧШЕНИЕ', f: p => p.drone++ }
+];
+const pn = c => lang === 'ru' ? c.nr : c.n, pd = c => lang === 'ru' ? c.dr : c.d;
+const PERK_HELP = {
+  'FINE-TUNING': ['ALL YOUR BULLETS HIT 25% HARDER, DRONE SHOTS INCLUDED. STACKS WITH EVERY COPY YOU TAKE.',
+                  'ВСЕ ТВОИ ПУЛИ БЬЮТ НА 25% СИЛЬНЕЕ, ВЫСТРЕЛЫ ДРОНА ТОЖЕ. СКЛАДЫВАЕТСЯ С КАЖДЫМ ВЗЯТЫМ РАЗОМ.'],
+  'OVERCLOCK': ['YOUR WEAPON FIRES 20% MORE OFTEN. ESPECIALLY GOOD WITH THE SMG AND THE SHOTGUN.',
+                'ОРУЖИЕ СТРЕЛЯЕТ НА 20% ЧАЩЕ. ОСОБЕННО ХОРОШО С АВТОМАТОМ И ДРОБОВИКОМ.'],
+  'LOW LATENCY': ['THE HERO RUNS 15% FASTER. HELPS TO DODGE CROWDS AND AGI BULLETS.',
+                  'ГЕРОЙ БЕГАЕТ НА 15% БЫСТРЕЕ. ПОМОГАЕТ УВОРАЧИВАТЬСЯ ОТ ТОЛПЫ И ПУЛЬ AGI.'],
+  'BACKUP': ['MAX HP +30 AND HEALS 30 AT ONCE. THE ONLY WAY TO RAISE YOUR HEALTH CAP.',
+             'МАКСИМУМ ЗДОРОВЬЯ +30 И СРАЗУ ЛЕЧИТ 30. ЕДИНСТВЕННЫЙ СПОСОБ ПОДНЯТЬ ПОТОЛОК ЗДОРОВЬЯ.'],
+  'GPU MELTDOWN': ['A FIERY AURA AROUND THE HERO CONSTANTLY BURNS NEARBY ENEMIES. EACH COPY WIDENS IT AND HURTS MORE. GHOSTS ARE IMMUNE.',
+                   'ВОКРУГ ГЕРОЯ ПОЯВЛЯЕТСЯ ОГНЕННАЯ АУРА, ОНА ПОСТОЯННО ЖЖЕТ ВРАГОВ РЯДОМ. КАЖДЫЙ ПОВТОР ШИРЕ И СИЛЬНЕЕ. ПРИЗРАКОВ НЕ БЕРЕТ.'],
+  'SELF-HEALING': ['THE HERO HEALS 1 HP PER SECOND ON ITS OWN. COPIES STACK.',
+                   'ГЕРОЙ САМ ВОССТАНАВЛИВАЕТ 1 ЕД ЗДОРОВЬЯ В СЕКУНДУ. ПОВТОРЫ СКЛАДЫВАЮТСЯ.'],
+  'MULTI-AGENT': ['EVERY SHOT FIRES ONE MORE BULLET. PISTOL AND SMG BULLETS FAN OUT, THE SHOTGUN JUST GETS ANOTHER PELLET. AMMO IS SPENT ONCE PER SHOT.',
+                  'КАЖДЫЙ ВЫСТРЕЛ ДАЕТ НА ОДНУ ПУЛЮ БОЛЬШЕ. У ПИСТОЛЕТА И АВТОМАТА ПУЛИ РАСХОДЯТСЯ ВЕЕРОМ, У ДРОБОВИКА ДОБАВЛЯЕТСЯ ДРОБИНКА. ПАТРОНЫ ТРАТЯТСЯ КАК НА ОДИН ВЫСТРЕЛ.'],
+  'CONTEXT WINDOW': ['AUTO-AIM SEES ENEMIES 30% FARTHER AND YOU PICK UP BONUSES FROM A 50% WIDER RADIUS.',
+                     'АВТОПРИЦЕЛ ВИДИТ ВРАГОВ НА 30% ДАЛЬШЕ, А БОНУСЫ ПОДБИРАЮТСЯ ИЗ РАДИУСА НА 50% БОЛЬШЕ.'],
+  'TEMPERATURE': ['EVERY BULLET HAS A 15% CHANCE TO DEAL DOUBLE DAMAGE. THE PRICE: BULLET SPREAD GROWS.',
+                  'КАЖДАЯ ПУЛЯ С ШАНСОМ 15% НАНОСИТ ДВОЙНОЙ УРОН. ЦЕНА - РАЗБРОС ПУЛЬ ВЫРАСТАЕТ.'],
+  'REASONING': ['PRESS E AND ENEMIES AND THEIR BULLETS SLOW TO A THIRD FOR 3 SECONDS WHILE YOU MOVE NORMALLY. COOLDOWN 17 SECONDS. COPIES LAST LONGER AND RECHARGE FASTER.',
+                'НАЖМИ E, И ВРАГИ С ИХ ПУЛЯМИ ЗАМЕДЛЯТСЯ ПРИМЕРНО В ТРИ РАЗА НА 3 СЕКУНДЫ, А ТЫ ДВИГАЕШЬСЯ КАК ОБЫЧНО. ПЕРЕЗАРЯДКА 17 СЕКУНД. ПОВТОРЫ ДЛЯТСЯ ДОЛЬШЕ И ЗАРЯЖАЮТСЯ БЫСТРЕЕ.'],
+  'RAG': ['BONUSES LYING NEARBY FLY TO YOU BY THEMSELVES. EACH COPY WIDENS THE PULL RADIUS.',
+          'БОНУСЫ, ЛЕЖАЩИЕ РЯДОМ, САМИ ЛЕТЯТ К ТЕБЕ. КАЖДЫЙ ПОВТОР РАСШИРЯЕТ РАДИУС ПРИТЯЖЕНИЯ.'],
+  'PROMPT ENGINEER': ['BULLETS TURN TOWARD THE NEAREST ENEMY NEAR THEM. EACH COPY STRENGTHENS THE HOMING.',
+                      'ПУЛИ САМИ ПОВОРАЧИВАЮТ К БЛИЖАЙШЕМУ ВРАГУ РЯДОМ С НИМИ. КАЖДЫЙ ПОВТОР УСИЛИВАЕТ НАВЕДЕНИЕ.'],
+  'COPILOT': ['A DRONE CIRCLES YOU AND SHOOTS THE NEAREST ENEMY ON ITS OWN. TAKING THE PERK AGAIN UPGRADES IT: FASTER FIRE AND MORE DAMAGE.',
+              'ДРОН КРУЖИТ РЯДОМ И САМ СТРЕЛЯЕТ В БЛИЖАЙШЕГО ВРАГА. ПОВТОРНЫЙ ПЕРК УЛУЧШАЕТ ЕГО: ОН СТРЕЛЯЕТ ЧАЩЕ И БЬЕТ СИЛЬНЕЕ.']
+};
+
+// ============ STORAGE (nickname, top 10, per-player stats) ============
+const LS_TOP = 'crimson8_top', LS_NICK = 'crimson8_nick', LS_STATS = 'crimson8_stats';
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+let topList = lsGet(LS_TOP, []);
+topList = Array.isArray(topList) ? topList.filter(e => e && typeof e.s === 'number' && typeof e.n === 'string').slice(0, 10) : [];
+let nick = lsGet(LS_NICK, ''); if (typeof nick !== 'string') nick = '';
+let stats = lsGet(LS_STATS, {}); if (!stats || typeof stats !== 'object') stats = {};
+let nameBuf = '', myRank = -1, myStats = null, overJoke = '';
+function recordScore() {
+  myRank = -1; myStats = null;
+  const name = nick || tr('player');
+  const key = name.toUpperCase(), st = stats[key] || { g: 0, k: 0, b: 0, w: 0 };
+  st.g++; st.k += kills; st.b = Math.max(st.b, score); st.w = Math.max(st.w, wave);
+  stats[key] = st; myStats = st; lsSet(LS_STATS, stats);
+  if (score <= 0) return;
+  const entry = { n: name, s: score, w: wave, k: kills };
+  topList.push(entry); topList.sort((a, b) => b.s - a.s);
+  myRank = topList.indexOf(entry);
+  topList = topList.slice(0, 10);
+  if (myRank > 9) myRank = -1;
+  lsSet(LS_TOP, topList);
+}
+
+// ============ STATE ============
+let scene = 'title', real = 0, time = 0;
+let P, enemies, bullets, ebul, parts, bonuses, floats;
+let wave, spawnLeft, spawnT, spawnGap, waveDelay, score, kills, shake, redFlash, whiteFlash, banner, bannerSub, pending, choices, perkSel, lock;
+let noticeS = '', noticeT = 0, helpPage = 0, helpFrom = 'title';
+let best = 0;
+try { best = +localStorage.getItem('crimson8_best') || 0; } catch (e) {}
+if (topList.length) best = Math.max(best, topList[0].s);
+
+const START_HP = 60;
+function reset() {
+  makeGround();
+  P = {
+    x: W / 2, y: H / 2, hp: START_HP, max: START_HP, ang: 0, face: 0, aim: 0, fireT: 0, inv: 0, shield: 0, fast: 0, agent: 0,
+    xp: 0, lvl: 1, need: 60, wpn: 'pistol', ammo: Infinity, step: 0, flashT: 0, dead: false,
+    dmg: 1, rate: 1, spd: 1, extra: 0, aura: 0, regen: 0, magnet: 1, target: null,
+    aimR: 1, crit: 0, temp: 1, reason: 0, slowT: 0, slowCd: 0, eDown: false, rag: 0, home: 0,
+    drone: 0, dA: 0, dT: 1, dx: W / 2, dy: H / 2
+  };
+  enemies = []; bullets = []; ebul = []; parts = []; bonuses = []; floats = [];
+  wave = 0; spawnLeft = 0; spawnT = 0; spawnGap = 1; waveDelay = 1; score = 0; kills = 0;
+  shake = 0; redFlash = 0; whiteFlash = 0; banner = 0; bannerSub = ''; pending = 0; time = 0; noticeT = 0;
+}
+
+// ============ HELPERS ============
+function stamp(img, x, y, ang, alpha = 1) {
+  if (!img) return;
+  gr.save(); gr.globalAlpha = alpha; gr.translate(Math.round(x), Math.round(y)); gr.rotate(quant(ang));
+  gr.drawImage(img, -(img.width >> 1), -(img.height >> 1)); gr.restore();
+}
+function pool(x, y, c, n, rad) {
+  gr.globalAlpha = .8;
+  for (let i = 0; i < n; i++) disc(gr, Math.round(x + rr(-rad, rad)), Math.round(y + rr(-rad, rad)), ri(1, 3), c);
+  gr.globalAlpha = 1;
+}
+function blood(x, y, c, n, dirx = 0, diry = 0, sp = 70) {
+  for (let i = 0; i < n; i++) {
+    const a = rr(0, 6.28), s = rr(10, sp);
+    parts.push({ x, y, vx: Math.cos(a) * s + dirx * .4, vy: Math.sin(a) * s + diry * .4, life: rr(.25, .6), c, blood: true });
+  }
+}
+function spark(x, y, c, n) {
+  for (let i = 0; i < n; i++) { const a = rr(0, 6.28), s = rr(20, 90); parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rr(.15, .4), c, blood: false }); }
+}
+function floater(x, y, s, c = 'W') { floats.push({ x, y, s, c, life: 1 }); }
+function notice(s, t = 3) { noticeS = s; noticeT = t; }
+function nearest(x, y, maxD, skipGhost = true) {
+  let best2 = maxD * maxD, r = null;
+  for (const e of enemies) {
+    if (e.dead || (skipGhost && e.ghost) || e.x < 0 || e.x > W || e.y < 0 || e.y > H) continue;
+    const d = (e.x - x) ** 2 + (e.y - y) ** 2; if (d < best2) { best2 = d; r = e; }
+  }
+  return r;
+}
+
+// ============ PLAYER ACTIONS ============
+function hurt(d) {
+  if (P.dead || P.inv > 0 || P.shield > 0) return;
+  P.hp -= d; P.inv = .4; redFlash = .35; shake = Math.max(shake, 5); sfx('hurt');
+  blood(P.x, P.y, 'R', 8);
+  if (P.hp <= 0) die();
+}
+function die() {
+  P.hp = 0; P.dead = true; scene = 'over'; lock = real + 1.2;
+  stamp(heroDead, P.x, P.y, P.ang); pool(P.x, P.y, 'r', 8, 9);
+  if (score > best) { best = score; try { localStorage.setItem('crimson8_best', best); } catch (e) {} }
+  recordScore(); overJoke = pick(tr('jokes')); sfx('over');
+}
+function fire() {
+  const w = WPN[P.wpn];
+  if (P.fireT > 0) return;
+  P.fireT = w.delay / P.rate;
+  const n = w.n + P.extra, fan = w.n === 1 ? .13 : 0, sp = w.spread * P.temp;
+  for (let i = 0; i < n; i++) {
+    const a = P.aim + (i - (n - 1) / 2) * fan + rr(-sp, sp), s = w.spd * rr(.92, 1.08);
+    const crit = Math.random() < P.crit;
+    bullets.push({ x: P.x + Math.cos(P.aim) * 9, y: P.y + Math.sin(P.aim) * 9, vx: Math.cos(a) * s, vy: Math.sin(a) * s, a, w, dmg: w.dmg * P.dmg * (crit ? 2 : 1), life: w.life, pierce: w.pierce, hit: [], home: P.home, spd: s });
+  }
+  P.flashT = .05; sfx(w.snd);
+  if (w.ammo !== Infinity && --P.ammo <= 0) { P.wpn = 'pistol'; P.ammo = Infinity; floater(P.x, P.y - 14, tr('noammo'), 'O'); sfx('empty'); }
+}
+function addXP(n) {
+  P.xp += n;
+  while (P.xp >= P.need) { P.xp -= P.need; P.lvl++; P.need = 60 + 40 * (P.lvl - 1); pending++; }
+  if (pending > 0 && scene === 'play') openPerk();
+}
+function openPerk() {
+  const pool2 = PERKS.slice(); choices = [];
+  while (choices.length < 3) choices.push(pool2.splice(ri(0, pool2.length - 1), 1)[0]);
+  perkSel = 1; scene = 'perk'; lock = real + .6; shake = 0; sfx('level');
+}
+function choosePerk(i) {
+  const c = choices[i], hadDrone = P.drone;
+  c.f(P); pending--; sfx('choose');
+  floater(P.x, P.y - 14, c.n === 'COPILOT' && !hadDrone ? tr('f_drone') : pn(c), 'Y');
+  if (pending > 0) openPerk(); else { scene = 'play'; lock = real + .3; }
+}
+
+// ============ ENEMIES ============
+function spawnEnemy(type, x, y) {
+  const T = ETYPE[type], sc = 1 + wave * (type === 'agi' ? .03 : .06);
+  const e = {
+    type, x, y, hp: T.hp * sc, max: T.hp * sc, spd: T.spd * (1 + Math.min(wave * .025, .5)) * rr(.9, 1.1),
+    dmg: T.dmg, r: T.r, ang: 0, anim: rr(0, 2), atkT: 0, hitT: 0, wob: rr(0, 6.28), art: ART[type], age: 0
+  };
+  if (type === 'ghost') { e.ghost = true; e.hp = e.max = 1; e.life = 7; e.atkT = .7; }
+  if (type === 'deepfake') e.blinkT = rr(1, 2.2);
+  if (type === 'agi') { e.boss = true; e.phase = 1; e.shootT = 3; e.summonT = 2; e.spd = T.spd; }
+  enemies.push(e); return e;
+}
+function edgePos() {
+  const s = ri(0, 3), m = 14;
+  return s === 0 ? [rr(0, W), -m] : s === 1 ? [W + m, rr(0, H)] : s === 2 ? [rr(0, W), H + m] : [-m, rr(0, H)];
+}
+const countType = t => { let n = 0; for (const e of enemies) if (e.type === t) n++; return n; };
+function spawnGroup() {
+  const wts = [['zombie', 6], ['spider', wave >= 2 ? 2 + wave * .4 : 0], ['lizard', wave >= 3 ? 1 + wave * .35 : 0],
+    ['bot', wave >= 3 ? 1.5 + wave * .2 : 0], ['ghost', wave >= 4 ? .8 + wave * .12 : 0],
+    ['brute', wave >= 5 ? .25 + (wave - 5) * .12 : 0], ['deepfake', wave >= 6 ? .5 + (wave - 6) * .1 : 0]];
+  let tot = 0; for (const w of wts) tot += w[1];
+  let r = Math.random() * tot, type = 'zombie';
+  for (const w of wts) { if ((r -= w[1]) <= 0) { type = w[0]; break; } }
+  if (type === 'ghost' && countType('ghost') >= 4) type = 'zombie';
+  if (type === 'deepfake' && countType('deepfake') >= 1 + ((wave / 10) | 0)) type = 'lizard';
+  if (type === 'ghost') {
+    let x, y, tries = 0;
+    do { x = rr(24, W - 24); y = rr(24, H - 24); } while (Math.hypot(x - P.x, y - P.y) < 90 && ++tries < 20);
+    spawnEnemy(type, x, y); spark(x, y, 'U', 10); return 1;
+  }
+  const [x, y] = edgePos();
+  if (type === 'spider') { const n = Math.min(3, spawnLeft); for (let i = 0; i < n; i++) spawnEnemy(type, x + rr(-10, 10), y + rr(-10, 10)); return n; }
+  if (type === 'bot') { const n = Math.min(ri(5, 8), spawnLeft); for (let i = 0; i < n; i++) spawnEnemy(type, x + rr(-14, 14), y + rr(-14, 14)); return n; }
+  spawnEnemy(type, x, y); return type === 'brute' ? Math.min(4, spawnLeft) : 1;
+}
+function startWave() {
+  wave++;
+  const boss = wave % 10 === 0;
+  spawnLeft = boss ? 8 : 7 + wave * 3 + (wave > 4 ? wave : 0);
+  spawnGap = Math.max(.25, 1.1 - wave * .06); spawnT = boss ? 3 : 0; banner = 2.6; waveDelay = 2.6;
+  bannerSub = boss ? tr('boss_in') : wave === 1 ? tr('survive') : pick(tr('wjokes'));
+  if (wave > 1) { score += wave * 50; P.hp = Math.min(P.max, P.hp + 8); }
+  if (boss) { spawnEnemy('agi', W / 2, -30); shake = 6; sfx('boss'); }
+  sfx('wave');
+}
+function ebShoot(x, y, a, spd, dmg) { ebul.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: 5, dmg }); }
+function bossAI(e, dt) {
+  const f = e.hp / e.max, ph = f > .66 ? 1 : f > .33 ? 2 : 3;
+  if (ph !== e.phase) { e.phase = ph; shake = 8; spark(e.x, e.y, 'W', 24); sfx('boss'); e.shootT = 1; }
+  e.spd = ETYPE.agi.spd * (ph === 3 ? 2.2 : ph === 2 ? 1.5 : 1);
+  e.summonT -= dt; e.shootT -= dt;
+  if (e.summonT <= 0) {
+    e.summonT = ph === 1 ? 4.5 : 5.5;
+    if (enemies.length < 90) for (let i = 0; i < (ph === 3 ? 3 : 5); i++) { const a = i / 5 * 6.28; spawnEnemy('bot', e.x + Math.cos(a) * 26, e.y + Math.sin(a) * 26); }
+    if (ph === 3 && countType('ghost') < 4) { spawnEnemy('ghost', rr(30, W - 30), rr(30, H - 30)); }
+    spark(e.x, e.y, 'U', 12);
+  }
+  if (ph >= 2 && e.shootT <= 0) {
+    e.shootT = ph === 2 ? 2.6 : 1.8;
+    const n = ph === 2 ? 10 : 14, a0 = rr(0, 6.28);
+    for (let i = 0; i < n; i++) ebShoot(e.x, e.y, a0 + i / n * 6.283, 80, 8);
+    if (ph === 3) ebShoot(e.x, e.y, Math.atan2(P.y - e.y, P.x - e.x), 130, 10);
+    sfx('shotgun');
+  }
+}
+function dmgEnemy(e, d, kx = 0, ky = 0) {
+  if (e.dead || e.ghost) return;
+  e.hp -= d; e.hitT = .07;
+  if (!e.boss) { e.x += kx; e.y += ky; }
+  if (e.hp <= 0) killEnemy(e); else sfx('hit');
+}
+function killEnemy(e) {
+  e.dead = true; kills++;
+  const T = ETYPE[e.type], big = e.type === 'brute' || e.boss;
+  score += T.score; addXP(T.xp);
+  blood(e.x, e.y, T.blood, e.boss ? 60 : big ? 26 : 12, 0, 0, 110);
+  pool(e.x, e.y, T.blood, e.boss ? 16 : big ? 9 : 4, e.r);
+  stamp(e.art.dead, e.x, e.y, e.boss ? 0 : e.ang);
+  if (e.boss) {
+    for (let i = 0; i < 3; i++) drop(e.x + rr(-25, 25), e.y + rr(-25, 25), true);
+    for (const o of enemies) if (o.ghost) o.dead = true;
+    ebul = []; whiteFlash = .6; shake = 12; notice(tr('boss_dead'), 4); sfx('nuke');
+  } else if (big) { drop(e.x, e.y, true); sfx('bigkill'); shake = Math.max(shake, 6); }
+  else { drop(e.x, e.y, e.type === 'deepfake' && Math.random() < .5); sfx('kill'); }
+}
+function drop(x, y, force) {
+  if (!force && Math.random() > .13) return;
+  const r = Math.random();
+  const type = r < .18 ? 'smg' : r < .32 ? 'shotgun' : r < .45 ? 'plasma' : r < .62 ? 'medkit' : r < .73 ? 'shield' : r < .82 ? 'speed' : r < .9 ? 'nuke' : 'agent';
+  bonuses.push({ type, x: clamp(x, 12, W - 12), y: clamp(y, 12, H - 12), life: 11, t: rr(0, 6) });
+}
+function pickup(b) {
+  sfx('pickup');
+  if (WPN[b.type]) { P.wpn = b.type; P.ammo = WPN[b.type].ammo; floater(P.x, P.y - 14, tr('w_' + b.type) + '!', 'Y'); return; }
+  if (b.type === 'medkit') { P.hp = Math.min(P.max, P.hp + 35); floater(P.x, P.y - 14, tr('f_med'), 'l'); }
+  else if (b.type === 'shield') { P.shield = 8; floater(P.x, P.y - 14, tr('f_shield'), 'U'); }
+  else if (b.type === 'speed') { P.fast = 8; floater(P.x, P.y - 14, tr('f_speed'), 'g'); }
+  else if (b.type === 'agent') { P.agent = 10; floater(P.x, P.y - 14, tr('f_agent'), 'P'); }
+  else if (b.type === 'nuke') {
+    sfx('nuke'); whiteFlash = .5; shake = 10; floater(P.x, P.y - 14, tr('f_nuke'), 'R'); ebul = [];
+    for (const e of enemies) if (!e.dead && e.x > -20 && e.x < W + 20 && e.y > -20 && e.y < H + 20) dmgEnemy(e, 220);
+  }
+}
+function autopilot() {
+  let ax = 0, ay = 0;
+  for (const e of enemies) {
+    const dx = P.x - e.x, dy = P.y - e.y, d = Math.hypot(dx, dy) || 1;
+    if (d < 100) { const w = (100 - d) / 100 * (e.boss ? 2 : 1); ax += dx / d * w; ay += dy / d * w; }
+  }
+  for (const b of ebul) {
+    const dx = P.x - b.x, dy = P.y - b.y, d = Math.hypot(dx, dy) || 1;
+    if (d < 45) { const w = (45 - d) / 45; ax += dx / d * w; ay += dy / d * w; }
+  }
+  ax += (P.x < 45 ? 1 : P.x > W - 45 ? -1 : 0) * 1.5; ay += (P.y < 45 ? 1 : P.y > H - 45 ? -1 : 0) * 1.5;
+  let nb = null, nd = 1e9;
+  for (const b of bonuses) { const d = Math.hypot(b.x - P.x, b.y - P.y); if (d < nd) { nd = d; nb = b; } }
+  if (nb && nd < 140) { ax += (nb.x - P.x) / nd * .8; ay += (nb.y - P.y) / nd * .8; }
+  const l = Math.hypot(ax, ay);
+  return l < .1 ? [0, 0] : [ax / l, ay / l];
+}
+
+// ============ UPDATE ============
+function update(dt) {
+  time += dt;
+  P.slowT -= dt; P.slowCd -= dt; P.agent -= dt;
+  const edt = P.slowT > 0 ? dt * .35 : dt;
+  // reasoning perk: slow time
+  if (keys.KeyE) {
+    if (!P.eDown && P.reason && P.slowCd <= 0) {
+      P.slowT = 2 + P.reason; P.slowCd = Math.max(6, 16 - 2 * P.reason) + P.slowT;
+      floater(P.x, P.y - 14, tr('f_slow'), 'U'); sfx('slow');
+    }
+    P.eDown = true;
+  } else P.eDown = false;
+
+  // --- movement (keyboard, or autopilot in agent mode)
+  const auto = P.agent > 0;
+  let mx, my;
+  if (auto) [mx, my] = autopilot();
+  else {
+    mx = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+    my = (keys.ArrowDown || keys.KeyS ? 1 : 0) - (keys.ArrowUp || keys.KeyW ? 1 : 0);
+  }
+  if (mx || my) { const l = Math.hypot(mx, my); mx /= l; my /= l; P.face = Math.atan2(my, mx); P.step += dt * 12; }
+  const sp = 64 * P.spd * (P.fast > 0 ? 1.5 : 1);
+  P.x = clamp(P.x + mx * sp * dt, 8, W - 8); P.y = clamp(P.y + my * sp * dt, 8, H - 8);
+  P.fireT -= dt; P.inv -= dt; P.shield -= dt; P.fast -= dt; P.flashT -= dt;
+  if (P.regen) P.hp = Math.min(P.max, P.hp + P.regen * dt);
+
+  // --- aim: mouse if recently moved, Shift = along movement, else auto-aim nearest enemy
+  const tgt = nearest(P.x, P.y, 210 * P.aimR);
+  P.target = null;
+  const mouseOn = !auto && performance.now() - mouse.last < 2500;
+  if (mouseOn) P.aim = Math.atan2(mouse.y - P.y, mouse.x - P.x);
+  else if (!auto && (keys.ShiftLeft || keys.ShiftRight)) P.aim = P.face;
+  else if (tgt) { P.aim = Math.atan2(tgt.y - P.y, tgt.x - P.x); P.target = tgt; }
+  else P.aim = P.face;
+  P.ang = P.aim;
+  if (keys.Space || keys.KeyZ || keys.KeyJ || mouse.down || (auto && tgt)) fire();
+
+  // --- copilot drone
+  if (P.drone) {
+    P.dA += dt * 2.2;
+    const tx = P.x + Math.cos(P.dA) * 20, ty = P.y + Math.sin(P.dA) * 14 - 4;
+    P.dx += (tx - P.dx) * Math.min(1, dt * 8); P.dy += (ty - P.dy) * Math.min(1, dt * 8);
+    P.dT -= dt;
+    if (P.dT <= 0) {
+      const t = nearest(P.dx, P.dy, 180);
+      if (t) {
+        const a = Math.atan2(t.y - P.dy, t.x - P.dx) + rr(-.05, .05);
+        bullets.push({ x: P.dx, y: P.dy, vx: Math.cos(a) * 290, vy: Math.sin(a) * 290, a, w: WPN.pistol, dmg: (6 + 4 * P.drone) * P.dmg, life: .7, pierce: 0, hit: [], home: 0, spd: 290 });
+        P.dT = .8 / (1 + .4 * (P.drone - 1)); sfx('drone');
+      } else P.dT = .1;
+    }
+  }
+
+  // --- waves
+  if (spawnLeft > 0) {
+    spawnT -= edt;
+    if (spawnT <= 0 && enemies.length < 80) { spawnLeft -= spawnGroup(); spawnT = spawnGap * rr(.6, 1.2); }
+  } else if (enemies.length === 0) { waveDelay -= dt; if (waveDelay <= 0) startWave(); }
+  banner -= dt; noticeT -= dt;
+
+  // --- player bullets
+  for (const b of bullets) {
+    if (b.home) {
+      const t = nearest(b.x, b.y, 70 + 15 * b.home);
+      if (t) {
+        let da = Math.atan2(t.y - b.y, t.x - b.x) - b.a; da = Math.atan2(Math.sin(da), Math.cos(da));
+        b.a += Math.sign(da) * Math.min(Math.abs(da), 2.6 * b.home * dt);
+        b.vx = Math.cos(b.a) * b.spd; b.vy = Math.sin(b.a) * b.spd;
+      }
+    }
+    b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+    if (b.life <= 0 || b.x < -10 || b.x > W + 10 || b.y < -10 || b.y > H + 10) { b.dead = true; continue; }
+    for (const e of enemies) {
+      if (e.dead || e.ghost || b.hit.includes(e)) continue;
+      const rad = e.r + 2;
+      if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < rad * rad) {
+        b.hit.push(e);
+        const k = e.boss ? 0 : e.type === 'brute' ? .3 : 1.4;
+        blood(b.x, b.y, ETYPE[e.type].blood, 3, b.vx, b.vy);
+        dmgEnemy(e, b.dmg, b.vx * .012 * k, b.vy * .012 * k);
+        if (b.pierce-- <= 0) { b.dead = true; break; }
+      }
+    }
+  }
+  bullets = bullets.filter(b => !b.dead);
+
+  // --- enemy bullets (AGI)
+  for (const b of ebul) {
+    b.x += b.vx * edt; b.y += b.vy * edt; b.life -= edt;
+    if (b.life <= 0 || b.x < -8 || b.x > W + 8 || b.y < -8 || b.y > H + 8) b.dead = true;
+    else if (!P.dead && (b.x - P.x) ** 2 + (b.y - P.y) ** 2 < 36) { hurt(b.dmg); b.dead = true; spark(b.x, b.y, 'R', 4); }
+  }
+  ebul = ebul.filter(b => !b.dead);
+
+  // --- enemies
+  const auraR = P.aura ? 24 + P.aura * 8 : 0;
+  for (const e of enemies) {
+    if (e.dead) continue;
+    e.age += edt; e.hitT -= edt; e.atkT -= edt; e.wob += edt * 3;
+    if (e.ghost) { e.life -= edt; if (e.life <= 0) { e.dead = true; spark(e.x, e.y, 'U', 8); continue; } }
+    if (e.type === 'deepfake') {
+      e.blinkT -= edt;
+      if (e.blinkT <= 0) {
+        e.blinkT = rr(1.8, 3); spark(e.x, e.y, 'P', 8);
+        const a = Math.atan2(P.y - e.y, P.x - e.x); e.x += Math.cos(a) * 36; e.y += Math.sin(a) * 36;
+        spark(e.x, e.y, 'P', 8); sfx('glitch');
+      }
+    }
+    if (e.boss) bossAI(e, edt);
+    const dx = P.x - e.x, dy = P.y - e.y, d = Math.hypot(dx, dy) || 1;
+    e.ang = Math.atan2(dy, dx) + Math.sin(e.wob) * (e.boss ? .04 : .12);
+    const s = e.spd * (e.hitT > 0 && !e.boss ? .4 : 1);
+    e.x += dx / d * s * edt; e.y += dy / d * s * edt; e.anim += edt * (s / 9);
+    if (!P.dead && d < e.r + 5 && e.atkT <= 0 && (!e.ghost || e.age > .6)) { e.atkT = .8; hurt(e.dmg); }
+    if (auraR && !e.ghost && d < auraR + e.r) dmgEnemy(e, (9 + P.aura * 5) * dt);
+  }
+  for (let i = 0; i < enemies.length; i++) {
+    const a = enemies[i]; if (a.dead || a.ghost || a.boss) continue;
+    for (let j = i + 1; j < enemies.length; j++) {
+      const b = enemies[j]; if (b.dead || b.ghost || b.boss) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, m = a.r + b.r - 1, d2 = dx * dx + dy * dy;
+      if (d2 < m * m && d2 > .01) { const d = Math.sqrt(d2), p = (m - d) * .5 / d; a.x -= dx * p; a.y -= dy * p; b.x += dx * p; b.y += dy * p; }
+    }
+  }
+  if (spawnLeft <= 0 && enemies.length && enemies.every(e => e.ghost || e.dead)) for (const e of enemies) { if (!e.dead) spark(e.x, e.y, 'U', 6); e.dead = true; }
+  enemies = enemies.filter(e => !e.dead);
+
+  // --- bonuses (RAG pulls them to you)
+  for (const b of bonuses) {
+    b.life -= dt; b.t += dt;
+    const dx = P.x - b.x, dy = P.y - b.y, d = Math.hypot(dx, dy) || 1;
+    if (P.rag && d < 50 + 35 * P.rag) { b.x += dx / d * 60 * dt; b.y += dy / d * 60 * dt; }
+    const pr = 11 * P.magnet;
+    if (d < pr) { pickup(b); b.life = 0; }
+  }
+  bonuses = bonuses.filter(b => b.life > 0);
+
+  // --- particles / floaters / timers
+  for (const p of parts) {
+    p.x += p.vx * dt; p.y += p.vy * dt; const f = Math.max(0, 1 - 4 * dt); p.vx *= f; p.vy *= f; p.life -= dt;
+    if (p.life <= 0 && p.blood) { gr.globalAlpha = .85; px(gr, Math.round(p.x), Math.round(p.y), p.c, Math.random() < .3 ? 2 : 1, 1); gr.globalAlpha = 1; }
+  }
+  parts = parts.filter(p => p.life > 0);
+  for (const f of floats) { f.y -= 14 * dt; f.life -= dt; }
+  floats = floats.filter(f => f.life > 0);
+  shake = Math.max(0, shake - dt * 22); redFlash = Math.max(0, redFlash - dt); whiteFlash = Math.max(0, whiteFlash - dt);
+}
+
+// ============ RENDER ============
+function shadow(x, y, r) {
+  g.fillStyle = 'rgba(0,0,0,.28)';
+  x = Math.round(x); y = Math.round(y + r * .5);
+  g.fillRect(x - r + 1, y, 2 * r - 2, 1); g.fillRect(x - r, y + 1, 2 * r, 1); g.fillRect(x - r + 1, y + 2, 2 * r - 2, 1);
+}
+function ring(cx, cy, r, c, n, phase = 0, dash = 1) {
+  g.fillStyle = col(c);
+  for (let i = 0; i < n; i++) if (i % (dash + 1) < dash) { const a = phase + i / n * 6.283; g.fillRect(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r), 1, 1); }
+}
+function bar(x, y, w, h, v, c, bg = 'D') {
+  g.fillStyle = PAL.K; g.fillRect(x - 1, y - 1, w + 2, h + 2);
+  g.fillStyle = col(bg); g.fillRect(x, y, w, h);
+  g.fillStyle = col(c); g.fillRect(x, y, Math.max(0, Math.round(w * clamp(v, 0, 1))), h);
+}
+function drawWorld(t) {
+  g.drawImage(ground, 0, 0);
+  for (const b of bonuses) {
+    if (b.life < 3 && ((b.life * 6) | 0) % 2) continue;
+    shadow(b.x, b.y + 4, 6);
+    g.drawImage(BON[b.type].img, Math.round(b.x) - 6, Math.round(b.y) - 6 + Math.round(Math.sin(b.t * 4) * 1.5));
+  }
+  if (P.aura && !P.dead) {
+    const r = 24 + P.aura * 8;
+    ring(P.x, P.y, r, 'O', 48, t * 2, 2); ring(P.x, P.y, r - 2, 'Y', 24, -t * 3, 1);
+  }
+  const list = enemies.map(e => ({ y: e.y, e })); if (!P.dead) list.push({ y: P.y, p: 1 });
+  list.sort((a, b) => a.y - b.y);
+  for (const o of list) {
+    if (o.p) {
+      const bob = Math.round(Math.sin(P.step) * .8);
+      shadow(P.x, P.y, 6);
+      const blink = P.inv > 0 && ((t * 30) | 0) % 2;
+      spr(g, blink ? heroSil : heroS, P.x, P.y + bob, P.ang);
+      if (P.flashT > 0) { g.fillStyle = PAL.Y; g.fillRect(Math.round(P.x + Math.cos(P.aim) * 15) - 1, Math.round(P.y + Math.sin(P.aim) * 15) - 1, 3, 3); g.fillStyle = PAL.W; g.fillRect(Math.round(P.x + Math.cos(P.aim) * 15), Math.round(P.y + Math.sin(P.aim) * 15), 1, 1); }
+      if (P.shield > 0 && (P.shield > 1.5 || ((t * 10) | 0) % 2)) { ring(P.x, P.y, 11, 'U', 40, t * 3, 3); ring(P.x, P.y, 12, 'W', 20, -t * 2, 1); }
+      if (P.agent > 0) { ring(P.x, P.y, 10, 'P', 36, -t * 4, 1); ring(P.x, P.y, 13, 'l', 24, t * 5, 2); }
+    } else {
+      const e = o.e, fr = Math.floor(e.anim) % 2;
+      if (e.ghost) {
+        g.globalAlpha = clamp(e.age / .6, 0, 1) * (e.life < 1.5 && ((t * 12) | 0) % 2 ? .25 : .5 + .25 * Math.sin(t * 25 + e.x));
+        spr(g, e.art.spr[fr], e.x, e.y, e.ang); g.globalAlpha = 1;
+        continue;
+      }
+      shadow(e.x, e.y, Math.min(e.r, 14));
+      if (e.boss) {
+        spr(g, (e.hitT > 0 ? e.art.sil : e.art.spr)[0], e.x, e.y, e.ang);
+        for (let i = 0; i < 4; i++) { const a = t * 1.5 + i * 1.571; g.drawImage(orbS, Math.round(e.x + Math.cos(a) * 30) - 2, Math.round(e.y + Math.sin(a) * 30) - 2); }
+        continue;
+      }
+      spr(g, (e.hitT > 0 ? e.art.sil : e.art.spr)[fr], e.x, e.y, e.ang);
+      if (e.type === 'brute' && e.hp < e.max) bar(Math.round(e.x) - 8, Math.round(e.y) - 18, 16, 2, e.hp / e.max, 'R', 'r');
+    }
+  }
+  if (P.drone && !P.dead) {
+    shadow(P.dx, P.dy + 6, 3);
+    const t2 = P.target || nearest(P.dx, P.dy, 180);
+    spr(g, droneS, P.dx, P.dy + Math.round(Math.sin(t * 8)), t2 ? Math.atan2(t2.y - P.dy, t2.x - P.dx) : P.ang);
+  }
+  for (const b of bullets) spr(g, b.w.img, b.x, b.y, b.a);
+  for (const b of ebul) g.drawImage(orbS, Math.round(b.x) - 2, Math.round(b.y) - 2);
+  for (const p of parts) { g.fillStyle = col(p.c); g.globalAlpha = clamp(p.life * 4, 0, 1); g.fillRect(Math.round(p.x), Math.round(p.y), 1, 1); }
+  g.globalAlpha = 1;
+  for (const f of floats) { g.globalAlpha = clamp(f.life * 2, 0, 1); text(g, f.s, f.x, f.y, f.c, 1, 'c'); }
+  g.globalAlpha = 1;
+  if (!P.dead && scene === 'play' && P.agent <= 0) {
+    if (performance.now() - mouse.last < 2500) {
+      const x = Math.round(mouse.x), y = Math.round(mouse.y); g.fillStyle = PAL.W;
+      g.fillRect(x - 4, y, 2, 1); g.fillRect(x + 3, y, 2, 1); g.fillRect(x, y - 4, 1, 2); g.fillRect(x, y + 3, 1, 2);
+    } else if (P.target && ((t * 6) | 0) % 2 === 0) {
+      const e = P.target, r = Math.min(e.r, 14) + 3; g.fillStyle = PAL.Y;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { g.fillRect(Math.round(e.x + sx * r) - (sx > 0 ? 1 : 0), Math.round(e.y + sy * r), 2, 1); g.fillRect(Math.round(e.x + sx * r), Math.round(e.y + sy * r) - (sy > 0 ? 1 : 0), 1, 2); }
+    }
+  }
+}
+function drawHUD(t) {
+  text(g, tr('hp'), 8, 6, 'W');
+  bar(24, 6, 66, 5, P.hp / P.max, P.hp / P.max < .3 && ((t * 6) | 0) % 2 ? 'O' : 'R', 'r');
+  text(g, Math.ceil(P.hp), 94, 6, 'W');
+  text(g, tr('lv') + P.lvl, 8, 16, 'Y');
+  bar(32, 17, 58, 3, P.xp / P.need, 'Y', 'D');
+  text(g, tr('score') + ' ' + score, W - 8, 6, 'W', 1, 'r');
+  text(g, tr('best') + ' ' + Math.max(best, score), W - 8, 16, 'A', 1, 'r');
+  const w = WPN[P.wpn];
+  text(g, tr('w_' + P.wpn) + (w.ammo === Infinity ? '' : ' ' + P.ammo), 8, H - 12, 'S');
+  if (P.reason) text(g, 'E ' + (P.slowT > 0 ? Math.ceil(P.slowT) + 'S' : P.slowCd > 0 ? Math.ceil(P.slowCd) : 'OK'), 8, H - 22, P.slowCd <= 0 ? 'U' : 'A');
+  text(g, tr('wave') + ' ' + wave, W - 8, H - 12, 'S', 1, 'r');
+  let bx = W / 2 - 40;
+  for (const [k, v] of [['shield', P.shield], ['speed', P.fast], ['agent', P.agent]]) {
+    if (v > 0) { g.drawImage(BON[k].img, bx, H - 20); text(g, Math.ceil(v), bx + 15, H - 16, 'W'); bx += 34; }
+  }
+  const boss = enemies.find(e => e.boss);
+  if (boss) {
+    text(g, 'AGI', W / 2, 20, 'P', 1, 'c');
+    bar(W / 2 - 80, 28, 160, 4, boss.hp / boss.max, 'U', 'P');
+  }
+  if (banner > 0 && scene !== 'over') {
+    g.globalAlpha = clamp(banner, 0, 1);
+    text(g, tr('wave') + ' ' + wave, W / 2, 60, wave % 10 === 0 ? 'R' : 'Y', 4, 'c');
+    text(g, bannerSub, W / 2, 86, 'W', 1, 'c');
+    if (wave > 1 && wave % 10) text(g, tr('bonus') + wave * 50, W / 2, 97, 'S', 1, 'c');
+    g.globalAlpha = 1;
+  }
+  if (noticeT > 0 && scene !== 'over') { g.globalAlpha = clamp(noticeT, 0, 1); text(g, noticeS, W / 2, 118, 'Y', 2, 'c'); g.globalAlpha = 1; }
+}
+function dim(a) { g.fillStyle = 'rgba(8,6,14,' + a + ')'; g.fillRect(0, 0, W, H); }
+function panel(x, y, w, h, hi) {
+  g.fillStyle = PAL.K; g.fillRect(x - 2, y - 2, w + 4, h + 4);
+  g.fillStyle = hi ? PAL.Y : PAL.A; g.fillRect(x - 1, y - 1, w + 2, h + 2);
+  g.fillStyle = '#1d1a2c'; g.fillRect(x, y, w, h);
+}
+function drawTable(x, y, w, rh, sc, hi) {
+  for (let i = 0; i < 10; i++) {
+    const e = topList[i], yy = y + i * rh, c = i === hi ? 'Y' : e ? 'W' : 'A';
+    text(g, i + 1, x + 9 * sc, yy, c, sc, 'r');
+    if (e) {
+      text(g, e.n, x + 13 * sc, yy, c, sc);
+      text(g, e.s, x + w - 24 * sc, yy, c, sc, 'r');
+      text(g, tr('wv') + e.w, x + w - 2 * sc, yy, i === hi ? 'Y' : 'S', sc, 'r');
+    } else text(g, '-', x + 13 * sc, yy, 'A', sc);
+  }
+}
+function drawTitle(t) {
+  g.drawImage(ground, 0, 0); dim(.6);
+  const sway = Math.round(Math.sin(t * 2) * 2);
+  text(g, tr('t1'), W / 2, 30 + sway, 'R', 8, 'c');
+  text(g, tr('t2'), W / 2, 78, 'Y', 6, 'c');
+  text(g, tr('sub'), W / 2, 114, 'A', 1, 'c');
+  spr(g, heroS, W / 2, 152, -.3 + Math.sin(t) * .2, 3);
+  const cast = [['zombie', 90, 160, 3.1, 2], ['spider', 150, 186, 3.0, 2], ['lizard', 310, 186, .1, 2], ['brute', 372, 156, .1, 2], ['bot', 330, 128, .1, 2], ['spider', 120, 128, 3.1, 1]];
+  for (const [n, x, y, a, s] of cast) spr(g, ART[n].spr[((t * 4) | 0) % 2], x, y + Math.sin(t * 3 + x) * 2, a, s);
+  if (((t * 2) | 0) % 2 === 0) text(g, tr('start'), W / 2, 208, 'W', 2, 'c');
+  text(g, tr('ctl1'), W / 2, 236, 'S', 1, 'c');
+  text(g, tr('ctl2'), W / 2, 246, 'S', 1, 'c');
+  text(g, tr('ctl3'), W / 2, 256, 'S', 1, 'c');
+  text(g, tr('tag'), W / 2, 272, 'A', 1, 'c');
+  if (best) text(g, tr('best') + ' ' + best, W / 2, 286, 'Y', 1, 'c');
+}
+function drawName(t) {
+  g.drawImage(ground, 0, 0); dim(.72);
+  text(g, tr('name_t'), W / 2, 52, 'Y', 3, 'c');
+  panel(W / 2 - 100, 100, 200, 30, true);
+  const w = tw(nameBuf, 2);
+  text(g, nameBuf, W / 2 - w / 2 - 3, 109, 'W', 2);
+  if (((t * 2) | 0) % 2 === 0) { g.fillStyle = PAL.Y; g.fillRect(Math.round(W / 2 - w / 2 - 3 + w + 3), 108, 6, 12); }
+  text(g, tr('name_hint'), W / 2, 146, 'A', 1, 'c');
+  text(g, tr('name_h'), W / 2, 176, 'S', 1, 'c');
+}
+function drawTop(t) {
+  g.drawImage(ground, 0, 0); dim(.75);
+  text(g, tr('top'), W / 2, 16, 'Y', 5, 'c');
+  panel(50, 60, 350, 190, false);
+  drawTable(55, 68, 340, 18, 2, -1);
+  text(g, tr('top_hint'), W / 2, 272, 'A', 1, 'c');
+}
+function drawHelp(t) {
+  g.drawImage(ground, 0, 0); dim(.86);
+  text(g, tr('h_title'), W / 2, 6, 'Y', 3, 'c');
+  text(g, tr('h_pages')[helpPage], W / 2, 28, 'S', 1, 'c');
+  let y = 42;
+  if (helpPage === 0) {
+    for (const l of wrap(tr('h_intro'), 426)) { text(g, l, 12, y, 'W'); y += 8; }
+    y += 4;
+    for (const l of wrap(tr('h_goal'), 426)) { text(g, l, 12, y, 'S'); y += 8; }
+    y += 6;
+    for (const k of ['smg', 'shotgun', 'plasma', 'medkit', 'shield', 'speed', 'nuke', 'agent']) {
+      g.drawImage(BON[k].img, 12, y - 3);
+      const [n, d] = tr('h_bon')[k];
+      text(g, n, 32, y, 'Y'); text(g, d, 32 + tw(n, 1) + 8, y, 'W'); y += 16;
+    }
+  } else if (helpPage === 1) {
+    for (const k of ['zombie', 'spider', 'lizard', 'bot', 'ghost', 'deepfake', 'brute', 'agi']) {
+      spr(g, ART[k].spr[0], 26, y + 8, 0, k === 'agi' ? .5 : k === 'brute' ? .8 : k === 'bot' ? 1.5 : 1);
+      const [n, d] = tr('h_en')[k], ls = wrap(d, 390);
+      text(g, n, 46, y, 'Y');
+      ls.forEach((l, i) => text(g, l, 46, y + 9 + i * 8, 'W'));
+      y += Math.max(26, 13 + ls.length * 8);
+    }
+  } else {
+    for (const c of helpPage === 2 ? PERKS.slice(0, 7) : PERKS.slice(7)) {
+      text(g, pn(c), 12, y, 'Y');
+      text(g, '- ' + pd(c), 12 + tw(pn(c), 1) + 8, y, 'S');
+      const ls = wrap(PERK_HELP[c.n][lang === 'ru' ? 1 : 0], 426);
+      ls.forEach((l, i) => text(g, l, 12, y + 9 + i * 8, 'W'));
+      y += 9 + ls.length * 8 + 6;
+    }
+  }
+  text(g, '< >  ' + (helpPage + 1) + '/4     ' + tr('h_nav'), W / 2, 288, 'A', 1, 'c');
+}
+function drawPerk(t) {
+  dim(.7);
+  text(g, tr('lvlup'), W / 2, 26, 'Y', 4, 'c');
+  text(g, tr('choose'), W / 2, 54, 'W', 1, 'c');
+  const cw = 130, gap = 12, x0 = (W - (cw * 3 + gap * 2)) / 2;
+  choices.forEach((c, i) => {
+    const x = Math.round(x0 + i * (cw + gap)), y = 96 + (i === perkSel ? -4 : 0);
+    panel(x, y, cw, 100, i === perkSel);
+    text(g, i + 1, x + cw / 2, y + 8, 'Y', 3, 'c');
+    wrap(pn(c), 116).forEach((l, k) => text(g, l, x + cw / 2, y + 36 + k * 8, 'W', 1, 'c'));
+    wrap(pd(c), 116).forEach((l, k) => text(g, l, x + cw / 2, y + 60 + k * 8, 'S', 1, 'c'));
+  });
+  if (real < lock) text(g, '...', W / 2, 214, 'A', 1, 'c');
+}
+function drawOver(t) {
+  dim(.6);
+  text(g, tr('over'), W / 2, 12, 'R', 5, 'c');
+  text(g, overJoke, W / 2, 44, 'A', 1, 'c');
+  const cx = 112;
+  text(g, nick || tr('player'), cx, 66, 'Y', 1, 'c');
+  text(g, tr('score') + ' ' + score, cx, 78, 'W', 2, 'c');
+  if (myRank >= 0) text(g, myRank === 0 ? tr('record') : tr('rank') + ' ' + (myRank + 1) + '!', cx, 102, 'Y', 1, 'c');
+  else text(g, tr('notop'), cx, 102, 'A', 1, 'c');
+  text(g, tr('wave') + ' ' + wave + '  ' + tr('lvl') + ' ' + P.lvl + '  ' + tr('kills') + ' ' + kills, cx, 116, 'S', 1, 'c');
+  if (myStats) text(g, tr('games') + ' ' + myStats.g + '  ' + tr('totalk') + ' ' + myStats.k, cx, 130, 'A', 1, 'c');
+  text(g, tr('top'), 328, 60, 'Y', 1, 'c');
+  panel(222, 70, 212, 98, false);
+  drawTable(224, 74, 208, 9, 1, myRank);
+  if (real > lock && ((t * 2) | 0) % 2 === 0) text(g, tr('again'), W / 2, 200, 'W', 2, 'c');
+}
+function render() {
+  const t = real;
+  if (scene === 'title') drawTitle(t);
+  else if (scene === 'name') drawName(t);
+  else if (scene === 'top') drawTop(t);
+  else if (scene === 'help') drawHelp(t);
+  else {
+    drawWorld(time); drawHUD(time);
+    if (P.slowT > 0) { g.fillStyle = 'rgba(79,127,214,.16)'; g.fillRect(0, 0, W, H); }
+    if (P.hp / P.max < .3 && !P.dead) { g.fillStyle = 'rgba(209,42,42,' + (.08 + .06 * Math.sin(time * 6)) + ')'; g.fillRect(0, 0, W, H); }
+    if (redFlash > 0) { g.fillStyle = 'rgba(209,42,42,' + redFlash * .6 + ')'; g.fillRect(0, 0, W, H); }
+    if (whiteFlash > 0) { g.fillStyle = 'rgba(255,255,255,' + whiteFlash * 1.6 + ')'; g.fillRect(0, 0, W, H); }
+    if (scene === 'perk') drawPerk(t);
+    else if (scene === 'pause') { dim(.6); text(g, tr('paused'), W / 2, 120, 'Y', 4, 'c'); text(g, tr('cont'), W / 2, 170, 'W', 1, 'c'); text(g, tr('h_pause'), W / 2, 186, 'S', 1, 'c'); }
+    else if (scene === 'over') drawOver(t);
+  }
+  if (muted) text(g, tr('mute'), W - 8, H - 22, 'A', 1, 'r');
+  const sh = scene === 'play' || scene === 'over' ? shake : 0;
+  const sx = sh ? Math.round((Math.random() - .5) * sh) * 2 : 0, sy = sh ? Math.round((Math.random() - .5) * sh) * 2 : 0;
+  out.fillStyle = '#000'; out.fillRect(0, 0, 900, 600);
+  out.drawImage(buf, sx, sy, 900, 600);
+}
+
+// ============ MAIN LOOP ============
+function nameInput() {
+  for (const k of typed) {
+    const ch = k.toUpperCase().replace('Ё', 'Е');
+    if (/^[A-ZА-Я0-9 .\-]$/.test(ch) && nameBuf.length < 10) nameBuf += ch;
+  }
+  typed.length = 0;
+  if (hit.has('Backspace')) nameBuf = nameBuf.slice(0, -1);
+  if (hit.has('Escape')) scene = 'title';
+  else if (hit.has('Enter') || hit.has('NumpadEnter')) {
+    nick = nameBuf.trim(); lsSet(LS_NICK, nick); reset(); scene = 'play'; sfx('choose');
+  }
+}
+function menuInput() {
+  const go = hit.has('Space') || hit.has('Enter') || hit.has('Click') || hit.has('KeyZ');
+  if (scene === 'name') { nameInput(); return; }
+  if (scene === 'top') { if (hit.size) scene = 'title'; return; }
+  if (scene === 'help') {
+    if (hit.has('ArrowRight') || hit.has('KeyD') || hit.has('Space') || hit.has('Click')) helpPage = (helpPage + 1) % 4;
+    if (hit.has('ArrowLeft') || hit.has('KeyA')) helpPage = (helpPage + 3) % 4;
+    if (hit.has('Escape') || hit.has('KeyH') || hit.has('Enter') || hit.has('Backspace')) scene = helpFrom;
+    if (hit.has('KeyL')) setLang(lang === 'ru' ? 'en' : 'ru');
+    return;
+  }
+  if (scene === 'title') {
+    if (go) { nameBuf = nick; typed.length = 0; scene = 'name'; }
+    else if (hit.has('KeyT')) scene = 'top';
+    else if (hit.has('KeyH')) { helpPage = 0; helpFrom = 'title'; scene = 'help'; }
+  } else if (scene === 'over') {
+    if (go && real > lock) { reset(); scene = 'play'; }
+    else if (hit.has('Escape')) scene = 'title';
+  } else if (scene === 'perk') {
+    if (real < lock) return;
+    if (hit.has('ArrowLeft') || hit.has('KeyA')) perkSel = (perkSel + 2) % 3;
+    if (hit.has('ArrowRight') || hit.has('KeyD')) perkSel = (perkSel + 1) % 3;
+    if (hit.has('Digit1') || hit.has('Numpad1')) choosePerk(0);
+    else if (hit.has('Digit2') || hit.has('Numpad2')) choosePerk(1);
+    else if (hit.has('Digit3') || hit.has('Numpad3')) choosePerk(2);
+    else if (hit.has('Enter') || hit.has('Space')) choosePerk(perkSel);
+  }
+  if (hit.has('KeyP') || hit.has('Escape')) {
+    if (scene === 'play') scene = 'pause'; else if (scene === 'pause') scene = 'play';
+  }
+  if (scene === 'pause' && hit.has('KeyH')) { helpPage = 0; helpFrom = 'pause'; scene = 'help'; return; }
+  if (hit.has('KeyM')) muted = !muted;
+  if (hit.has('KeyL')) setLang(lang === 'ru' ? 'en' : 'ru');
+}
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - lastT) / 1000); lastT = now; real += dt;
+  menuInput(); hit.clear();
+  if (scene === 'play') update(dt);
+  else if (scene === 'over') { for (const p of parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; } parts = parts.filter(p => p.life > 0); shake = Math.max(0, shake - dt * 22); redFlash = Math.max(0, redFlash - dt); banner = 0; noticeT = 0; }
+  render();
+  requestAnimationFrame(frame);
+}
+function fit() {
+  const s = Math.min(innerWidth / 1000, innerHeight / 780, 1.6);
+  document.getElementById('stage').style.transform = 'translate(-50%,-50%) scale(' + s + ')';
+}
+addEventListener('resize', fit); fit();
+reset(); cv.focus();
+window.__game = {
+  get scene() { return scene; }, get P() { return P; }, get enemies() { return enemies; }, get wave() { return wave; }, get score() { return score; },
+  get top() { return topList; }, get nick() { return nick; }
+};
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
