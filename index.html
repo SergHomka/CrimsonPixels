@@ -313,7 +313,7 @@ const I18N = {
     ctl3: 'T - ТОП 10    H - ПОМОЩЬ    L - ENGLISH',
     h_title: 'ПОМОЩЬ', h_nav: 'СТРЕЛКИ - ЛИСТАТЬ    ESC - НАЗАД', h_pause: 'H - ПОМОЩЬ',
     h_pages: ['КАК ИГРАТЬ И БОНУСЫ', 'ВРАГИ', 'ПЕРКИ 1 ИЗ 2', 'ПЕРКИ 2 ИЗ 2'],
-    h_intro: 'СТРЕЛКИ ИЛИ WASD - ХОДИТЬ. ПРОБЕЛ, Z ИЛИ МЫШЬ - СТРЕЛЯТЬ. ЦЕЛИТСЯ ИГРА САМА, ЛИБО ВЕДИ МЫШЬЮ. SHIFT - ЦЕЛИТЬСЯ ТУДА, КУДА ИДЕШЬ. E - ЗАМЕДЛЕНИЕ ВРЕМЕНИ, ЕСЛИ ВЗЯЛ ПЕРК РАССУЖДЕНИЕ. P - ПАУЗА, M - ЗВУК, L - ЯЗЫК.',
+    h_intro: 'СТРЕЛКИ ИЛИ WASD - ХОДИТЬ. ПРОБЕЛ, Z ИЛИ МЫШЬ - СТРЕЛЯТЬ. ЦЕЛИТСЯ ИГРА САМА, ЛИБО ВЕДИ МЫШЬЮ. SHIFT - ЦЕЛИТЬСЯ ТУДА, КУДА ИДЕШЬ. E - ЗАМЕДЛЕНИЕ ВРЕМЕНИ, ЕСЛИ ВЗЯЛ ПЕРК РАССУЖДЕНИЕ. P - ПАУЗА, НА ПАУЗЕ Q - ВЫЙТИ С СОХРАНЕНИЕМ РЕЗУЛЬТАТА, M - ЗВУК, L - ЯЗЫК.',
     h_goal: 'ЦЕЛЬ: ВЫЖИТЬ КАК МОЖНО ДОЛЬШЕ. УБИВАЙ ВРАГОВ, КОПИ ОПЫТ, НА КАЖДОМ НОВОМ УРОВНЕ ВЫБИРАЙ ПЕРК. КАЖДЫЕ 10 ВОЛН ПРИХОДИТ БОСС AGI. ИЗ ВРАГОВ ИНОГДА ВЫПАДАЮТ БОНУСЫ:',
     h_bon: {
       smg: ['АВТОМАТ', 'ОЧЕНЬ БЫСТРАЯ СТРЕЛЬБА, 140 ПАТРОНОВ'],
@@ -345,6 +345,7 @@ const I18N = {
     lvlup: 'МОДЕЛЬ ДООБУЧЕНА!', choose: 'ВЫБЕРИ ДОНАСТРОЙКУ: 1-2-3 ИЛИ СТРЕЛКИ + ПРОБЕЛ',
     over: 'КОНЕЦ ИГРЫ', record: 'НОВЫЙ РЕКОРД!', lvl: 'УРОВЕНЬ', kills: 'УБИТО', again: 'НАЖМИ ПРОБЕЛ ЕЩЕ РАЗ',
     paused: 'КОНТЕКСТ СОХРАНЕН', cont: 'НАЖМИ P ЧТОБЫ ПРОДОЛЖИТЬ',
+    q_hint: 'Q - ВЫЙТИ И СОХРАНИТЬ РЕЗУЛЬТАТ', q_confirm: 'НАЖМИ Q ЕЩЕ РАЗ, ЧТОБЫ ВЫЙТИ', q_msg: 'ТЫ ВЫШЕЛ ДОСРОЧНО. РЕЗУЛЬТАТ СОХРАНЕН',
     name_t: 'ВВЕДИ СВОЙ НИК', name_h: 'ENTER - ИГРАТЬ      ESC - НАЗАД', name_hint: 'БУКВЫ, ЦИФРЫ, ПРОБЕЛ, ТОЧКА, ДЕФИС',
     top: 'ТОП 10', top_hint: 'ЛЮБАЯ КЛАВИША - НАЗАД', wv: 'В', rank: 'ТЫ ЗАНЯЛ МЕСТО', notop: 'ПОКА НЕ В ТОП 10',
     games: 'ИГР', totalk: 'УБИТО ВСЕГО', player: 'ИГРОК',
@@ -360,7 +361,7 @@ const I18N = {
     ctl3: 'T - TOP 10    H - HELP    L - РУССКИЙ',
     h_title: 'HELP', h_nav: 'ARROWS - PAGES    ESC - BACK', h_pause: 'H - HELP',
     h_pages: ['HOW TO PLAY AND BONUSES', 'ENEMIES', 'PERKS 1 OF 2', 'PERKS 2 OF 2'],
-    h_intro: 'ARROWS OR WASD - MOVE. SPACE, Z OR MOUSE - FIRE. THE GAME AIMS FOR YOU, OR STEER WITH THE MOUSE. SHIFT - AIM WHERE YOU WALK. E - SLOW TIME, IF YOU TOOK THE REASONING PERK. P - PAUSE, M - SOUND, L - LANGUAGE.',
+    h_intro: 'ARROWS OR WASD - MOVE. SPACE, Z OR MOUSE - FIRE. THE GAME AIMS FOR YOU, OR STEER WITH THE MOUSE. SHIFT - AIM WHERE YOU WALK. E - SLOW TIME, IF YOU TOOK THE REASONING PERK. P - PAUSE, ON PAUSE Q - QUIT AND SAVE YOUR SCORE, M - SOUND, L - LANGUAGE.',
     h_goal: 'GOAL: SURVIVE AS LONG AS YOU CAN. KILL ENEMIES, GAIN XP, PICK A PERK ON EVERY LEVEL UP. THE AGI BOSS COMES EVERY 10 WAVES. ENEMIES SOMETIMES DROP BONUSES:',
     h_bon: {
       smg: ['SMG', 'VERY FAST FIRE, 140 ROUNDS'],
@@ -392,6 +393,7 @@ const I18N = {
     lvlup: 'MODEL RETRAINED!', choose: 'PICK A FINE-TUNE: 1-2-3 OR ARROWS + SPACE',
     over: 'GAME OVER', record: 'NEW RECORD!', lvl: 'LEVEL', kills: 'KILLS', again: 'PRESS SPACE TO TRY AGAIN',
     paused: 'CONTEXT SAVED', cont: 'PRESS P TO CONTINUE',
+    q_hint: 'Q - QUIT AND SAVE YOUR SCORE', q_confirm: 'PRESS Q AGAIN TO QUIT', q_msg: 'YOU QUIT EARLY. SCORE SAVED',
     name_t: 'ENTER YOUR NICKNAME', name_h: 'ENTER - PLAY      ESC - BACK', name_hint: 'LETTERS, DIGITS, SPACE, DOT, DASH',
     top: 'TOP 10', top_hint: 'ANY KEY - BACK', wv: 'W', rank: 'YOU RANKED #', notop: 'NOT IN THE TOP 10 YET',
     games: 'GAMES', totalk: 'TOTAL KILLS', player: 'PLAYER',
@@ -657,7 +659,7 @@ function recordScore() {
 let scene = 'title', real = 0, time = 0;
 let P, enemies, bullets, ebul, parts, bonuses, floats;
 let wave, spawnLeft, spawnT, spawnGap, waveDelay, score, kills, shake, redFlash, whiteFlash, banner, bannerSub, pending, choices, perkSel, lock;
-let noticeS = '', noticeT = 0, helpPage = 0, helpFrom = 'title';
+let noticeS = '', noticeT = 0, helpPage = 0, helpFrom = 'title', quitConfirm = false;
 let best = 0;
 try { best = +localStorage.getItem('crimson8_best') || 0; } catch (e) {}
 if (topList.length) best = Math.max(best, topList[0].s);
@@ -720,6 +722,11 @@ function die() {
   stamp(heroDead, P.x, P.y, P.ang); pool(P.x, P.y, 'r', 8, 9);
   if (score > best) { best = score; try { localStorage.setItem('crimson8_best', best); } catch (e) {} }
   recordScore(); overJoke = pick(tr('jokes')); sfx('over');
+}
+function quitGame() {
+  scene = 'over'; lock = real + .6; quitConfirm = false;
+  if (score > best) { best = score; try { localStorage.setItem('crimson8_best', best); } catch (e) {} }
+  recordScore(); overJoke = tr('q_msg'); sfx('choose');
 }
 function fire() {
   const w = WPN[P.wpn];
@@ -1263,7 +1270,7 @@ function render() {
     if (redFlash > 0) { g.fillStyle = 'rgba(209,42,42,' + redFlash * .6 + ')'; g.fillRect(0, 0, W, H); }
     if (whiteFlash > 0) { g.fillStyle = 'rgba(255,255,255,' + whiteFlash * 1.6 + ')'; g.fillRect(0, 0, W, H); }
     if (scene === 'perk') drawPerk(t);
-    else if (scene === 'pause') { dim(.6); text(g, tr('paused'), W / 2, 120, 'Y', 4, 'c'); text(g, tr('cont'), W / 2, 170, 'W', 1, 'c'); text(g, tr('h_pause'), W / 2, 186, 'S', 1, 'c'); }
+    else if (scene === 'pause') { dim(.6); text(g, tr('paused'), W / 2, 120, 'Y', 4, 'c'); text(g, tr('cont'), W / 2, 170, 'W', 1, 'c'); text(g, tr('h_pause'), W / 2, 186, 'S', 1, 'c'); text(g, quitConfirm ? tr('q_confirm') : tr('q_hint'), W / 2, 200, quitConfirm ? 'R' : 'S', 1, 'c'); }
     else if (scene === 'over') drawOver(t);
   }
   if (muted) text(g, tr('mute'), W - 8, H - 22, 'A', 1, 'r');
@@ -1313,6 +1320,10 @@ function menuInput() {
     else if (hit.has('Digit3') || hit.has('Numpad3')) choosePerk(2);
     else if (hit.has('Enter') || hit.has('Space')) choosePerk(perkSel);
   }
+  if (scene === 'pause') {
+    if (hit.has('KeyQ')) { if (quitConfirm) { quitGame(); return; } quitConfirm = true; }
+    else if (hit.size) quitConfirm = false;
+  } else quitConfirm = false;
   if (hit.has('KeyP') || hit.has('Escape')) {
     if (scene === 'play') scene = 'pause'; else if (scene === 'pause') scene = 'play';
   }
